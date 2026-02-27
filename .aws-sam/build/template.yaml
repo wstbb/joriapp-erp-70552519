@@ -192,7 +192,6 @@ Resources:
   SuperAdminSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: SuperAdminCredentials
       Description: "\u7528\u4E8EERP\u540E\u7AEF\u7684\u8D85\u7EA7\u7BA1\u7406\u5458\
         \u51ED\u8BC1"
       SecretString:

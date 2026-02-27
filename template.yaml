@@ -181,10 +181,9 @@ Resources:
         - Key: Name
           Value: 智汇ERP-DB实例
 
-  SuperAdminSecret: # [关键修复] 逻辑名称已改回
+  SuperAdminSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: SuperAdminCredentials
       Description: "用于ERP后端的超级管理员凭证"
       SecretString: !Sub '{"username": "superadmin", "password": "test1234"}'
 
@@ -245,7 +244,7 @@ Resources:
           DB_USER: !Ref DBUser
           DB_PASSWORD: !Ref DBPassword
           JWT_SECRET: your_jwt_secret_here
-          SUPER_ADMIN_SECRET_ARN: !Ref SuperAdminSecret # [关键修复] 引用已更新
+          SUPER_ADMIN_SECRET_ARN: !Ref SuperAdminSecret
       Events:
         AuthApi:
           Type: Api
