@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   智汇-ERP后端 (zhihui-erp-backend)
 
-  一个为多租户ERP系统设计的、包含安全网络环境的SAM模板。
+  一个为多租户ERP系统设计的、包含安全网络环境和正确Lambda配置的SAM模板。
 
 Globals:
   Function:
@@ -51,17 +51,6 @@ Resources:
         - Key: Name
           Value: 智汇ERP-公共子网A
 
-  PublicSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [ 1, !GetAZs '' ]
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: 智汇ERP-公共子网B
-
   PrivateSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -71,16 +60,6 @@ Resources:
       Tags:
         - Key: Name
           Value: 智汇ERP-私有子网A
-
-  PrivateSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.4.0/24
-      AvailabilityZone: !Select [ 1, !GetAZs '' ]
-      Tags:
-        - Key: Name
-          Value: 智汇ERP-私有子网B
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -146,22 +125,10 @@ Resources:
       SubnetId: !Ref PublicSubnetA
       RouteTableId: !Ref PublicRouteTable
 
-  PublicSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnetB
-      RouteTableId: !Ref PublicRouteTable
-
   PrivateSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetA
-      RouteTableId: !Ref PrivateRouteTable
-
-  PrivateSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnetB
       RouteTableId: !Ref PrivateRouteTable
 
   # --- 安全组 ---
@@ -195,7 +162,6 @@ Resources:
       DBSubnetGroupDescription: "为 RDS 设计的子网组"
       SubnetIds:
         - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
 
   DBInstance:
     Type: AWS::RDS::DBInstance
@@ -215,12 +181,30 @@ Resources:
         - Key: Name
           Value: 智汇ERP-DB实例
 
+  SuperAdminSecret: # [关键修复] 逻辑名称已改回
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: SuperAdminCredentials
+      Description: "用于ERP后端的超级管理员凭证"
+      SecretString: !Sub '{"username": "superadmin", "password": "test1234"}'
+
+  # --- Lambda Layers ---
+  DatabaseUtilsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: zhihui-erp-db-utils-layer
+      Description: "提供数据库连接和通用功能的共享工具层"
+      ContentUri: backend/lambda/layers/database_utils
+      CompatibleRuntimes:
+        - python3.11
+      RetentionPolicy: Retain
+
   # --- Lambda 函数 ---
   DbSetupFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: erp-db-setup-function
-      CodeUri: backend/lambda/db_setup_assets
+      CodeUri: backend/lambda/db_setup_assets/
       Handler: db_setup.handler
       Policies:
         - VPCAccessPolicy: {}
@@ -229,7 +213,6 @@ Resources:
           - !Ref LambdaSecurityGroup
         SubnetIds:
           - !Ref PrivateSubnetA
-          - !Ref PrivateSubnetB
       Environment:
         Variables:
           DB_HOST: !GetAtt DBInstance.Endpoint.Address
@@ -238,22 +221,22 @@ Resources:
           DB_USER: !Ref DBUser
           DB_PASSWORD: !Ref DBPassword
 
-  LoginFunction:
+  AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: erp-login-function
-      CodeUri: backend/lambda/login
-      Handler: app.handler
+      FunctionName: erp-auth-function
+      CodeUri: backend/lambda/auth/
+      Handler: auth.handler
+      Layers:
+        - !Ref DatabaseUtilsLayer
       Policies:
         - VPCAccessPolicy: {}
-        - AmazonDynamoDBFullAccess # 占位符, 根据需要调整
-        - SecretsManagerReadWrite # 用于读取超级管理员凭证
+        - SecretsManagerReadWrite
       VpcConfig:
         SecurityGroupIds:
           - !Ref LambdaSecurityGroup
         SubnetIds:
           - !Ref PrivateSubnetA
-          - !Ref PrivateSubnetB
       Environment:
         Variables:
           DB_HOST: !GetAtt DBInstance.Endpoint.Address
@@ -261,26 +244,79 @@ Resources:
           DB_NAME: !Ref DBName
           DB_USER: !Ref DBUser
           DB_PASSWORD: !Ref DBPassword
-          JWT_SECRET: your_jwt_secret_here # 请替换为真实的密钥
-          SUPER_ADMIN_SECRET_ARN: !Ref SuperAdminCredentials
+          JWT_SECRET: your_jwt_secret_here
+          SUPER_ADMIN_SECRET_ARN: !Ref SuperAdminSecret # [关键修复] 引用已更新
       Events:
-        Login:
+        AuthApi:
           Type: Api
           Properties:
-            Path: /login
-            Method: post
-  
-  SuperAdminCredentials:
-    Type: AWS::SecretsManager::Secret
+            Path: /auth/{proxy+}
+            Method: ANY
+
+  TenantsFunction:
+    Type: AWS::Serverless::Function
     Properties:
-      Name: SuperAdminCredentials
-      Description: "用于ERP后端的超级管理员凭证"
-      SecretString: !Sub '{"username": "superadmin", "password": "test1234"}'
+      FunctionName: erp-tenants-function
+      CodeUri: backend/lambda/tenants/
+      Handler: tenants.handler
+      Layers:
+        - !Ref DatabaseUtilsLayer
+      Policies:
+        - VPCAccessPolicy: {}
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt DBInstance.Endpoint.Address
+          DB_PORT: !GetAtt DBInstance.Endpoint.Port
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          JWT_SECRET: your_jwt_secret_here
+      Events:
+        TenantsApi:
+          Type: Api
+          Properties:
+            Path: /tenants
+            Method: ANY
+
+  UsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: erp-users-function
+      CodeUri: backend/lambda/users/
+      Handler: users.handler
+      Layers:
+        - !Ref DatabaseUtilsLayer
+      Policies:
+        - VPCAccessPolicy: {}
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt DBInstance.Endpoint.Address
+          DB_PORT: !GetAtt DBInstance.Endpoint.Port
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          JWT_SECRET: your_jwt_secret_here
+      Events:
+        UsersApi:
+          Type: Api
+          Properties:
+            Path: /users/{proxy+}
+            Method: ANY
 
 Outputs:
-  LoginApiEndpoint:
-    Description: "登录函数的 API 网关终端节点 URL"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/login"
+  ApiGatewayEndpoint:
+    Description: "API 网关的根终端节点 URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
   DbSetupFunctionName:
     Description: "DbSetup Lambda 函数的名称"
     Value: !Ref DbSetupFunction

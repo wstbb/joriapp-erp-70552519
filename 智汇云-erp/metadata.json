@@ -1,0 +1,5 @@
+{
+  "name": "智汇云 ERP (Cloud-Native Edition)",
+  "description": "基于 AWS 云原生架构的五金机电行业 ERP 系统。集成税务局电子发票系统，支持 Lambda 无服务器后端、RDS 数据库及 API Gateway 管理。具备智能补货、多仓联动及本地局域网安全打印方案。",
+  "requestFramePermissions": ["geolocation"]
+}
