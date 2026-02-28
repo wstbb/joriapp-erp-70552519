@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  智汇-ERP后端 (zhihui-erp-backend)
+  智汇-ERP后端 (zhihui-erp-backend) V3
 
-  一个为多租户ERP系统设计的、包含安全网络环境和正确Lambda配置的SAM模板。
+  一个为多租户ERP系统设计的、采用现代HTTP API架构的SAM模板。
 
 Globals:
   Function:
@@ -17,19 +17,35 @@ Parameters:
   DBName:
     Type: String
     Default: jori_erp_db
-    Description: RDS PostgreSQL 数据库的名称。
+    Description: The name for the RDS PostgreSQL database.
   DBUser:
     Type: String
     Default: postgres
-    Description: RDS 数据库的主用户名。
+    Description: Master username for the RDS database.
   DBPassword:
     Type: String
     Default: test1234
     NoEcho: true
-    Description: RDS 数据库的主密码。
+    Description: Master password for the RDS database.
 
 Resources:
-  # --- 网络基础设施 ---
+  ZhiHuiErpHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          # 诊断性配置，暂时允许所有来源
+          - "*"
+        AllowHeaders:
+          - "Content-Type"
+          - "Authorization"
+        AllowMethods:
+          # 明确允许预检请求所使用的OPTIONS方法
+          - "GET"
+          - "POST"
+          - "OPTIONS"
+
+  # --- Network Infrastructure (Omitted for brevity, unchanged) ---
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -60,6 +76,27 @@ Resources:
       Tags:
         - Key: Name
           Value: 智汇ERP-私有子网A
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: 智汇ERP-公共子网B
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: 智汇ERP-私有子网B
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -125,17 +162,28 @@ Resources:
       SubnetId: !Ref PublicSubnetA
       RouteTableId: !Ref PublicRouteTable
 
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
   PrivateSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetA
       RouteTableId: !Ref PrivateRouteTable
 
-  # --- 安全组 ---
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "为 Lambda 函数设计的安全组"
+      GroupDescription: "Security group for Lambda functions"
       VpcId: !Ref VPC
       Tags:
         - Key: Name
@@ -144,7 +192,7 @@ Resources:
   RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "为 RDS 实例设计的安全组"
+      GroupDescription: "Security group for the RDS instance"
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -155,13 +203,13 @@ Resources:
         - Key: Name
           Value: 智汇ERP-Rds安全组
   
-  # --- 数据库 ---
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupDescription: "为 RDS 设计的子网组"
+      DBSubnetGroupDescription: "Subnet group for the RDS instance, covering multiple AZs"
       SubnetIds:
         - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
 
   DBInstance:
     Type: AWS::RDS::DBInstance
@@ -177,6 +225,7 @@ Resources:
       VPCSecurityGroups:
         - !Ref RDSSecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: true
       Tags:
         - Key: Name
           Value: 智汇ERP-DB实例
@@ -184,27 +233,29 @@ Resources:
   SuperAdminSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Description: "用于ERP后端的超级管理员凭证"
+      Description: "Super admin credentials for the ERP backend"
       SecretString: !Sub '{"username": "superadmin", "password": "test1234"}'
 
-  # --- Lambda Layers ---
   DatabaseUtilsLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: zhihui-erp-db-utils-layer
-      Description: "提供数据库连接和通用功能的共享工具层"
+      Description: "Shared utilities layer for database connections"
       ContentUri: backend/lambda/layers/database_utils
       CompatibleRuntimes:
         - python3.11
       RetentionPolicy: Retain
+    Metadata:
+      BuildMethod: python3.11
 
-  # --- Lambda 函数 ---
   DbSetupFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: erp-db-setup-function
       CodeUri: backend/lambda/db_setup_assets/
       Handler: db_setup.handler
+      Layers:
+        - !Ref DatabaseUtilsLayer
       Policies:
         - VPCAccessPolicy: {}
       VpcConfig:
@@ -212,6 +263,7 @@ Resources:
           - !Ref LambdaSecurityGroup
         SubnetIds:
           - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
       Environment:
         Variables:
           DB_HOST: !GetAtt DBInstance.Endpoint.Address
@@ -236,6 +288,7 @@ Resources:
           - !Ref LambdaSecurityGroup
         SubnetIds:
           - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
       Environment:
         Variables:
           DB_HOST: !GetAtt DBInstance.Endpoint.Address
@@ -246,11 +299,12 @@ Resources:
           JWT_SECRET: your_jwt_secret_here
           SUPER_ADMIN_SECRET_ARN: !Ref SuperAdminSecret
       Events:
-        AuthApi:
-          Type: Api
+        LoginApi:
+          Type: HttpApi
           Properties:
-            Path: /auth/{proxy+}
-            Method: ANY
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/auth/login
+            Method: POST
 
   TenantsFunction:
     Type: AWS::Serverless::Function
@@ -267,6 +321,7 @@ Resources:
           - !Ref LambdaSecurityGroup
         SubnetIds:
           - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
       Environment:
         Variables:
           DB_HOST: !GetAtt DBInstance.Endpoint.Address
@@ -276,11 +331,18 @@ Resources:
           DB_PASSWORD: !Ref DBPassword
           JWT_SECRET: your_jwt_secret_here
       Events:
-        TenantsApi:
-          Type: Api
+        GetTenantsApi:
+          Type: HttpApi
           Properties:
-            Path: /tenants
-            Method: ANY
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants
+            Method: GET
+        CreateTenantApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants
+            Method: POST
 
   UsersFunction:
     Type: AWS::Serverless::Function
@@ -297,6 +359,7 @@ Resources:
           - !Ref LambdaSecurityGroup
         SubnetIds:
           - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
       Environment:
         Variables:
           DB_HOST: !GetAtt DBInstance.Endpoint.Address
@@ -306,19 +369,27 @@ Resources:
           DB_PASSWORD: !Ref DBPassword
           JWT_SECRET: your_jwt_secret_here
       Events:
-        UsersApi:
-          Type: Api
+        # 出于完整性考虑，同样进行精确化改造
+        ListUsersApi:
+          Type: HttpApi
           Properties:
-            Path: /users/{proxy+}
-            Method: ANY
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/users
+            Method: GET
+        GetUserApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/users/{userId}
+            Method: GET
 
 Outputs:
   ApiGatewayEndpoint:
-    Description: "API 网关的根终端节点 URL"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+    Description: "Root endpoint URL for the HTTP API Gateway"
+    Value: !Sub "https://${ZhiHuiErpHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
   DbSetupFunctionName:
-    Description: "DbSetup Lambda 函数的名称"
+    Description: "Name of the DbSetup Lambda function"
     Value: !Ref DbSetupFunction
   DBEndpoint:
-    Description: "RDS 实例的终端节点地址"
+    Description: "Endpoint address of the RDS instance"
     Value: !GetAtt DBInstance.Endpoint.Address

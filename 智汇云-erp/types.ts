@@ -82,6 +82,8 @@ export interface User {
   mobileAccess?: boolean;
   permissions?: string[];
   tenantPlan?: PlanType;
+  is_super_admin?: boolean;
+  token?: string;
 }
 
 export interface Ticket {

@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
+import apiClient from '../api'; // 【修正】导入 apiClient
 import { Icons } from '../components/Icons';
 import { Tenant, Ticket, StatCardProps } from '../types';
 
-// API端点保持不变
-const API_ENDPOINT = 'https://w3uhc17ssi.execute-api.ap-northeast-1.amazonaws.com/';
+// 【修正】删除硬编码的 API_ENDPOINT
+// const API_ENDPOINT = 'https://w3uhc17ssi.execute-api.ap-northeast-1.amazonaws.com/';
 
-// 其他辅助函数 (formatDate, transformTenantFromApi) 保持不变
 const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString();
@@ -24,7 +24,6 @@ const transformTenantFromApi = (apiTenant: any): Tenant => ({
     industry: apiTenant.industry
 });
 
-// StatCard 组件保持不变
 const StatCard: React.FC<StatCardProps> = ({ title, value, trend, trendLabel, icon, color, onClick }) => (
   <div onClick={onClick} className={`bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-lg transition-all cursor-pointer group relative overflow-hidden`}>
     <div className={`absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity transform group-hover:scale-110 duration-500`}>
@@ -47,18 +46,12 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, trend, trendLabel, ic
   </div>
 );
 
-
-// ====================================================================
-// ========================= 【核心改动】 =========================
-// ====================================================================
 export const SaasAdmin: React.FC<{ 
     onLogout: () => void;
     tickets: Ticket[];
     onResolveTicket: (id: string) => void;
-    token: string; // 新增：接收从父组件传递过来的认证令牌
-}> = ({ onLogout, tickets, onResolveTicket, token }) => { // 在这里解构 token
-// ====================================================================
-// ====================================================================
+    token: string;
+}> = ({ onLogout, tickets, onResolveTicket, token }) => {
     
     const [tenants, setTenants] = useState<Tenant[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -69,30 +62,21 @@ export const SaasAdmin: React.FC<{
     const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
     const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
-    // 【改动】在获取租户列表时，附带认证令牌
+    // 【修正】使用 apiClient 和传入的 token
     useEffect(() => {
         const fetchTenants = async () => {
-            if (!token) { // 如果没有令牌，则不执行获取
+            if (!token) {
                 setIsLoading(false);
+                // 生产环境中最好不要用 alert，但为了调试暂时保留
                 alert("认证信息丢失，无法加载租户数据。");
                 return;
             }
 
             try {
                 setIsLoading(true);
-                const response = await fetch(`${API_ENDPOINT}api/tenants`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}` // 在请求头中加入JWT
-                    }
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || 'Failed to fetch tenants');
-                }
-
-                const data = await response.json();
-                const transformedTenants = data.map(transformTenantFromApi);
+                // apiClient 已经配置了 baseURL 和 Authorization header
+                const response = await apiClient.get('/api/tenants');
+                const transformedTenants = response.data.map(transformTenantFromApi);
                 setTenants(transformedTenants);
 
             } catch (error) {
@@ -104,9 +88,8 @@ export const SaasAdmin: React.FC<{
         };
 
         fetchTenants();
-    }, [token]); // 依赖项中加入 token，确保 token 变化时重新获取
+    }, [token]);
     
-    // 其他状态计算保持不变
     const activeTenants = tenants.filter(t => t.status === 'active').length;
     const pendingTickets = tickets.filter(t => t.status !== 'resolved').length;
     const newThisMonth = tenants.filter(t => {
@@ -115,13 +98,12 @@ export const SaasAdmin: React.FC<{
         return createdAt.getMonth() === now.getMonth() && createdAt.getFullYear() === now.getFullYear();
     }).length;
     
-    // 其他辅助函数 (closeAndResetModal, handleEnterConsole, etc.) 保持不变
     const closeAndResetModal = () => { setShowCreateModal(false); setIsSubmitting(false); setCreationResult(null); };
     const handleEnterConsole = (tenant: Tenant) => { setSelectedTenant(tenant); setView('tenant_console'); };
     const handleViewTicket = (ticket: Ticket) => { setSelectedTicket(ticket); setView('ticket_detail'); };
     const handleResolveTicket = (id: string) => { onResolveTicket(id); if (selectedTicket && selectedTicket.id === id) { setSelectedTicket({ ...selectedTicket, status: 'resolved' }); } };
 
-    // 【改动】在创建新租户时，附带认证令牌
+    // 【修正】使用 apiClient 创建新租户
     const handleCreateTenant = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -145,25 +127,14 @@ export const SaasAdmin: React.FC<{
         const newTenantPayload = { name, domain, adminName, adminEmail, industry, plan };
 
         try {
-            const response = await fetch(`${API_ENDPOINT}api/tenants`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}` // 在请求头中加入JWT
-                },
-                body: JSON.stringify(newTenantPayload)
-            });
+            // apiClient 会自动处理认证
+            const response = await apiClient.post('/api/tenants', newTenantPayload);
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Failed to create tenant');
-            }
-
-            const result = await response.json();
+            const result = response.data;
             const newTenant = transformTenantFromApi(result.tenant);
             
             setTenants([newTenant, ...tenants]);
-            setCreationResult({ ...newTenant, initialPassword: result.password || '123456' }); // 提供一个默认密码以防后端没返回
+            setCreationResult({ ...newTenant, initialPassword: result.password || '123456' });
             
         } catch (error) {
             console.error("Error creating tenant:", error);
@@ -172,8 +143,7 @@ export const SaasAdmin: React.FC<{
         }
     };
     
-    // TenantConsole, TicketDetail, TicketList 子组件保持不变
-    const TenantConsole = () => { /* ... 保持不变 ... */
+    const TenantConsole = () => {
         if (!selectedTenant) return null;
         const displayTenant = { ...selectedTenant, createdAt: formatDate(selectedTenant.createdAt) };
         return (
@@ -191,7 +161,7 @@ export const SaasAdmin: React.FC<{
             </div>
         );
      };
-    const TicketDetail = () => { /* ... 保持不变 ... */ 
+    const TicketDetail = () => {
         if (!selectedTicket) return null;
         return (
             <div className="animate-fade-in space-y-6">
@@ -200,17 +170,15 @@ export const SaasAdmin: React.FC<{
             </div>
         );
     };
-    const TicketList = () => { /* ... 保持不变 ... */ 
+    const TicketList = () => {
         const [filter, setFilter] = useState<'all' | 'pending' | 'resolved'>('all');
         const filteredTickets = tickets.filter(t => filter === 'all' || (filter === 'pending' ? t.status !== 'resolved' : t.status === 'resolved'));
         return <div className="animate-fade-in space-y-6">{/* ... */}</div>;
     };
 
 
-    // 主渲染 JSX 结构保持不变
     return (
         <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
-            {/* Header */}
             <header className="bg-gray-900 text-white px-8 py-4 flex justify-between items-center shadow-lg">
                 <div className="flex items-center gap-3"><div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center font-bold text-xl shadow-lg shadow-primary-900/50">S</div><div><h1 className="text-lg font-bold tracking-tight">SaaS 运营管理平台</h1><p className="text-xs text-gray-400">超级管理员控制台</p></div></div>
                 <div className="flex items-center gap-4"><span className="text-sm text-gray-300">System Admin</span><button onClick={onLogout} className="p-2 hover:bg-gray-800 rounded-full transition-colors text-gray-400 hover:text-white"><Icons.LogOut className="w-5 h-5" /></button></div>
@@ -219,7 +187,6 @@ export const SaasAdmin: React.FC<{
             <main className="max-w-7xl mx-auto p-8">
                 {view === 'dashboard' && (
                     <div className="animate-fade-in">
-                        {/* Stats */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                             <StatCard title="总租户" value={isLoading ? "..." : tenants.length.toString()} icon={<Icons.Users className="w-6 h-6 text-primary-600" />} color="bg-primary-50" />
                             <StatCard title="活跃租户" value={isLoading ? "..." : activeTenants.toString()} icon={<Icons.Activity className="w-6 h-6 text-green-600" />} color="bg-green-50" />
@@ -227,7 +194,6 @@ export const SaasAdmin: React.FC<{
                             <StatCard title="本月新增" value={isLoading ? "..." : newThisMonth.toString()} icon={<Icons.NewUser className="w-6 h-6 text-indigo-600" />} color="bg-indigo-50" />
                         </div>
 
-                        {/* Tenant List */}
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                                 <div><h2 className="text-lg font-bold text-gray-900">租户管理</h2><p className="text-sm text-gray-500 mt-1">管理所有企业实例及部署状态</p></div>
@@ -261,7 +227,6 @@ export const SaasAdmin: React.FC<{
                 {view === 'ticket_detail' && <TicketDetail />}
             </main>
 
-            {/* Create Tenant Modal */}
             {showCreateModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transition-all">

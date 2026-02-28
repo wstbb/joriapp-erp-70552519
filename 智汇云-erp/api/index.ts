@@ -4,7 +4,7 @@ import { User, Tenant } from '../types'; // Adjusted path to root
 
 // Create an Axios instance
 const apiClient = axios.create({
-  baseURL: 'https://w3uhc17ssi.execute-api.ap-northeast-1.amazonaws.com', // The final, correct, and active HTTP API Invoke URL
+  baseURL: 'https://rbg9venhb0.execute-api.ap-northeast-1.amazonaws.com', // The final, correct, and active HTTP API Invoke URL
   timeout: 10000, // 10 second timeout
   headers: {
     'Content-Type': 'application/json',

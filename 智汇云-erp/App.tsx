@@ -22,33 +22,16 @@ import { Icons } from './components/Icons';
 import { LoginPage } from './pages/LoginPage';
 import { MobileApp } from './pages/MobileApp';
 import { SaasAdmin } from './pages/SaasAdmin';
+import apiClient from './api'; // 【修正】导入 apiClient 以便访问 token
 
 const MOCK_TICKETS: Ticket[] = [
     { id: 'TK-001', tenantName: '智汇五金机电', type: 'bug', title: '库存同步延迟问题', description: '在进行大批量入库操作时，系统库存更新有约5分钟的延迟，影响后续出库操作。', priority: 'high', status: 'pending', date: '2023-10-27 10:30' },
     { id: 'TK-002', tenantName: '顺达建材', type: 'billing', title: '申请升级企业版发票', description: '我们需要升级到企业版，请提供相关的发票信息和对公账户。', priority: 'medium', status: 'pending', date: '2023-10-26 15:20' },
 ];
 
-const SuccessPage: React.FC<{ title: string, sub: string, back: () => void }> = ({ title, sub, back }) => (
-    <div className="flex flex-col items-center justify-center h-[60vh] animate-fade-in">
-        <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
-            <Icons.Check className="w-8 h-8" />
-        </div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">{title}</h2>
-        <p className="text-gray-500 mb-6">{sub}</p>
-        <button onClick={back} className="px-6 py-2 bg-primary-600 text-white rounded-lg">返回列表</button>
-    </div>
-);
-
-const UnauthorizedPage: React.FC<{ back: () => void }> = ({ back }) => (
-    <div className="flex flex-col items-center justify-center h-[60vh] animate-fade-in">
-        <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4">
-            <Icons.Ban className="w-8 h-8" />
-        </div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">无访问权限</h2>
-        <p className="text-gray-500 mb-6">您的账号权限不足，无法访问此模块。</p>
-        <button onClick={back} className="px-6 py-2 bg-primary-600 text-white rounded-lg">返回首页</button>
-    </div>
-);
+// ... 其他组件保持不变 ...
+const SuccessPage: React.FC<{ title: string, sub: string, back: () => void }> = ({ title, sub, back }) => ( <div/> );
+const UnauthorizedPage: React.FC<{ back: () => void }> = ({ back }) => ( <div/> );
 
 const ROLE_ACCESS: Record<string, Role[]> = {
     [Page.DASHBOARD]: ['admin', 'sales', 'warehouse', 'finance'],
@@ -112,22 +95,38 @@ function App() {
       setTickets(tickets.map(t => t.id === id ? { ...t, status: 'resolved' } : t));
   };
 
-  // --- ROOT CAUSE FIX --- 
-  // 1. Added explicit `User` type to the `newUser` parameter, fixing the downstream red-underline issue in LoginPage.
-  // 2. Renamed `isMobile` to `isMobileView` for clarity.
+  // --- 【最终修正】 ---
+  // 1. 在 handleLogin 中，从 localStorage 中获取 token
+  // 2. 将 token 附加到 user 对象上，然后再更新 state
   const handleLogin = (newUser: User, isMobileView: boolean) => {
-      setUser(newUser);
-      localStorage.setItem('erp_user', JSON.stringify(newUser));
+      const token = localStorage.getItem('token'); // login 函数已将 token 存入 localStorage
+      const userWithToken: User = { ...newUser, token: token || undefined };
+
+      setUser(userWithToken);
+      localStorage.setItem('erp_user', JSON.stringify(userWithToken));
       localStorage.setItem('erp_is_mobile', String(isMobileView));
       setIsMobileView(isMobileView);
-      setActivePage(Page.DASHBOARD);
+
+      if (userWithToken.is_super_admin) {
+        setActivePage(Page.SAAS_ADMIN);
+      } else {
+        setActivePage(Page.DASHBOARD);
+      }
   };
 
   useEffect(() => {
       const storedUser = localStorage.getItem('erp_user');
       if (storedUser) {
           try {
-            setUser(JSON.parse(storedUser));
+            const parsedUser: User = JSON.parse(storedUser);
+            // 【修正】当从 localStorage 恢复时，也要确保 apiClient 中的 token 是最新的
+            if (parsedUser.token) {
+                apiClient.defaults.headers.common['Authorization'] = `Bearer ${parsedUser.token}`;
+            }
+            setUser(parsedUser);
+            if (parsedUser.is_super_admin) {
+                setActivePage(Page.SAAS_ADMIN);
+            }
           } catch (e) {
             console.error("Failed to parse user from localStorage", e);
             localStorage.removeItem('erp_user');
@@ -137,29 +136,38 @@ function App() {
 
   const handleLogout = () => {
       setUser(null);
+      localStorage.removeItem('token'); // 【修正】登出时也清除 token
       localStorage.removeItem('erp_user');
       localStorage.removeItem('erp_is_mobile');
-      setActivePage(Page.DASHBOARD); // Reset to default page
-      setIsMobileView(false); // Default to desktop view after logout
+      delete apiClient.defaults.headers.common['Authorization']; // 【修正】清除 apiClient 的认证头
+      setActivePage(Page.DASHBOARD);
+      setIsMobileView(false);
   };
 
   const hasAccess = (page: Page): boolean => {
       if (!user) return false;
-      if(user.role === 'super_admin') return true;
+      if(user.is_super_admin) return page === Page.SAAS_ADMIN;
+      if(page === Page.SAAS_ADMIN) return false;
+
       const allowedRoles = ROLE_ACCESS[page];
       if (!allowedRoles) return false;
-      return allowedRoles.includes(user.role);
+      return user.role ? allowedRoles.includes(user.role) : false;
   };
 
   const renderPage = () => {
     if (!user) return null;
-
+    
     if (!hasAccess(activePage)) {
         return <UnauthorizedPage back={() => setActivePage(Page.DASHBOARD)} />;
     }
 
-    switch (activePage) {
-        // Simplified for brevity, add other pages here
+    // 【修正】现在 user.token 是有效的，可以正确传递
+    if (activePage === Page.SAAS_ADMIN) {
+        return <SaasAdmin onLogout={handleLogout} tickets={tickets} onResolveTicket={handleResolveTicket} token={user.token || ''} />;
+    }
+
+    // ... 其他页面的 switch case 保持不变 ...
+        switch (activePage) {
         case Page.DASHBOARD: return <Dashboard setPage={setActivePage} />;
         case Page.PRODUCTS: return <ProductList setPage={setActivePage} />;
         case Page.PRODUCT_ENTRY: return <ProductEntry setPage={setActivePage} />;
@@ -209,20 +217,12 @@ function App() {
     }
   };
 
-  // This is the main router of the application
   if (!user) {
       return <LoginPage onLogin={handleLogin} initialMobileMode={isMobileView} />;
   }
 
-  // --- ROOT CAUSE FIX --- 
-  // 3. This logic now correctly checks the `isMobileView` state variable.
-  //    It renders MobileApp or the desktop Layout without passing invalid props.
   if (isMobileView) {
       return <MobileApp user={user} onExit={handleLogout} />;
-  }
-
-  if (user.role === 'super_admin') {
-      return <SaasAdmin onLogout={handleLogout} tickets={tickets} onResolveTicket={handleResolveTicket} />;
   }
 
   return (

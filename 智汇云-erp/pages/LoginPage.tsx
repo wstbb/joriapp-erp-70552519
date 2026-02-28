@@ -50,26 +50,36 @@ const DesktopLogin: React.FC<DesktopLoginProps> = ({ onLogin, onSwitchToMobile }
     const [loading, setLoading] = useState(false);
     const [tenants, setTenants] = useState<Tenant[]>([]);
     const [selectedTenant, setSelectedTenant] = useState('');
+    const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
     useEffect(() => {
-        const fetchTenants = async () => {
-            try {
-                const tenantsData = await getTenants();
-                setTenants(tenantsData);
-                // If there's only one tenant, auto-select it
-                if (tenantsData.length === 1) {
-                    setSelectedTenant(tenantsData[0].domain);
+        const checkSuperAdmin = usernameInput.toLowerCase() === 'superadmin';
+        setIsSuperAdmin(checkSuperAdmin);
+    }, [usernameInput]);
+
+    useEffect(() => {
+        if (isSuperAdmin) {
+            setSelectedTenant(''); // Reset tenant selection for superadmin
+        } else {
+            const fetchTenants = async () => {
+                try {
+                    const tenantsData = await getTenants();
+                    setTenants(tenantsData);
+                    if (tenantsData.length === 1) {
+                        setSelectedTenant(tenantsData[0].domain);
+                    }
+                } catch (err) {
+                    setError('无法加载租户列表，请联系管理员。');
                 }
-            } catch (err) {
-                setError('无法加载租户列表，请联系管理员。');
-            }
-        };
-        fetchTenants();
-    }, []);
+            };
+            fetchTenants();
+        }
+    }, [isSuperAdmin]);
 
     const handleLogin = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
-        if (!selectedTenant) {
+        
+        if (!isSuperAdmin && !selectedTenant) {
             setError('请先选择一个租户。');
             return;
         }
@@ -79,8 +89,8 @@ const DesktopLogin: React.FC<DesktopLoginProps> = ({ onLogin, onSwitchToMobile }
         setLoading(true);
         setError('');
         try {
-            // Pass the selected tenant domain to the login function
-            const user = await login(usernameInput, loginPassword, selectedTenant);
+            const tenantIdentifier = isSuperAdmin ? 'superadmin' : selectedTenant;
+            const user = await login(usernameInput, loginPassword, tenantIdentifier);
             onLogin(user);
         } catch (err) {
             setError(getErrorMessage(err));
@@ -91,7 +101,11 @@ const DesktopLogin: React.FC<DesktopLoginProps> = ({ onLogin, onSwitchToMobile }
 
     const handleQuickLogin = (role: string) => {
         setUsernameInput(role);
-        setPassword('••••••');
+        if (role === 'superadmin') {
+            setPassword('test1234');
+        } else {
+            setPassword('123456');
+        }
     };
 
     return (
@@ -106,25 +120,27 @@ const DesktopLogin: React.FC<DesktopLoginProps> = ({ onLogin, onSwitchToMobile }
                     <form onSubmit={handleLogin} className="space-y-5">
                         {error && <div className="bg-red-100 border border-red-200 text-red-700 text-sm rounded-lg p-3 flex items-center"><Icons.AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" /><p>{error}</p></div>}
                         
-                        <div>
-                            <label htmlFor="tenant" className="text-sm font-medium text-gray-700 mb-1 block">选择租户</label>
-                            <div className="relative">
-                                <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Icons.Building className="h-5 w-5 text-gray-400" /></span>
-                                <select 
-                                    id="tenant" 
-                                    value={selectedTenant}
-                                    onChange={(e) => setSelectedTenant(e.target.value)}
-                                    className="h-12 w-full rounded-lg border-gray-200 border pl-10 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition appearance-none bg-white"
-                                    required
-                                >
-                                    <option value="" disabled>-- {tenants.length > 0 ? '请选择您的企业实例' : '加载中...'} --</option>
-                                    {tenants.map(tenant => (
-                                        <option key={tenant.id} value={tenant.domain}>{tenant.name} ({tenant.domain})</option>
-                                    ))}
-                                </select>
-                                <span className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none"><Icons.ChevronDown className="h-5 w-5 text-gray-400" /></span>
+                        {!isSuperAdmin && (
+                            <div>
+                                <label htmlFor="tenant" className="text-sm font-medium text-gray-700 mb-1 block">选择租户</label>
+                                <div className="relative">
+                                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Icons.Building className="h-5 w-5 text-gray-400" /></span>
+                                    <select 
+                                        id="tenant" 
+                                        value={selectedTenant}
+                                        onChange={(e) => setSelectedTenant(e.target.value)}
+                                        className="h-12 w-full rounded-lg border-gray-200 border pl-10 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition appearance-none bg-white"
+                                        required={!isSuperAdmin}
+                                    >
+                                        <option value="" disabled>-- {tenants.length > 0 ? '请选择您的企业实例' : '加载中...'} --</option>
+                                        {tenants.map(tenant => (
+                                            <option key={tenant.id} value={tenant.domain}>{tenant.name} ({tenant.domain})</option>
+                                        ))}
+                                    </select>
+                                    <span className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none"><Icons.ChevronDown className="h-5 w-5 text-gray-400" /></span>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         <div>
                             <label htmlFor="username" className="text-sm font-medium text-gray-700 mb-1 block">账号</label>
@@ -132,12 +148,12 @@ const DesktopLogin: React.FC<DesktopLoginProps> = ({ onLogin, onSwitchToMobile }
                         </div>
                         <div>
                             <label htmlFor="password" className="text-sm font-medium text-gray-700 mb-1 block">密码</label>
-                            <div className="relative"><span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Icons.Lock className="h-5 w-5 text-gray-400" /></span><input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-12 w-full rounded-lg border-gray-200 border pl-10 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" required /></div>
+                            <div className="relative"><span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Icons.Lock className="h-5 w-5 text-gray-400" /></span><input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-12 w-full rounded-lg border-gray-200 border pl-10 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" required autoComplete="new-password" /></div>
                         </div>
                         <button type="submit" className="w-full h-12 flex items-center justify-center gap-2 rounded-lg text-sm font-bold bg-[#007BFF] text-white hover:bg-blue-600 disabled:opacity-50 transition-colors" disabled={loading}>{loading ? <Icons.LoaderCircle className="animate-spin" /> : <> <Icons.ArrowRight className="w-5 h-5" /> 立即登录 </>}</button>
                     </form>
                     <div className="mt-6 text-center">
-                        <p className="text-xs text-gray-400 mb-3">快速体验账号 (密码: 123456)</p>
+                        <p className="text-xs text-gray-400 mb-3">快速体验账号</p>
                         <div className="flex flex-wrap justify-center gap-2 text-xs">
                             <QuickLoginButton onClick={() => handleQuickLogin('admin')}>管理员: admin</QuickLoginButton>
                             <QuickLoginButton onClick={() => handleQuickLogin('sales')}>销售: sales</QuickLoginButton>
@@ -146,7 +162,7 @@ const DesktopLogin: React.FC<DesktopLoginProps> = ({ onLogin, onSwitchToMobile }
                         </div>
                          <div className="flex flex-wrap justify-center gap-2 text-xs mt-2">
                             <QuickLoginButton onClick={() => handleQuickLogin('basic')}>基础版: basic</QuickLoginButton>
-                            <QuickLoginButton onClick={() => handleQuickLogin('super_admin')} variant="dark">系统管理员</QuickLoginButton>
+                            <QuickLoginButton onClick={() => handleQuickLogin('superadmin')} variant="dark">系统管理员</QuickLoginButton>
                         </div>
                     </div>
                 </div>
@@ -207,6 +223,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, initialMobileMode
     const handleLoginFromChild = (user: User, isMobile: boolean) => {
         onLogin(user, isMobile);
     };
+
+
 
     if (isMobileView) {
         return <MobileLogin onLogin={(user) => handleLoginFromChild(user, true)} onSwitchToDesktop={() => setIsMobileView(false)} />;
