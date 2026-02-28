@@ -29,23 +29,48 @@ Parameters:
     Description: Master password for the RDS database.
 
 Resources:
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Name
+          Value: 智汇ERP-前端存储桶
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${FrontendBucket}/*"
+
   ZhiHuiErpHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       CorsConfiguration:
         AllowOrigins:
-          # 诊断性配置，暂时允许所有来源
           - "*"
         AllowHeaders:
           - "Content-Type"
           - "Authorization"
         AllowMethods:
-          # 明确允许预检请求所使用的OPTIONS方法
           - "GET"
           - "POST"
           - "OPTIONS"
 
-  # --- Network Infrastructure (Omitted for brevity, unchanged) ---
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -369,7 +394,6 @@ Resources:
           DB_PASSWORD: !Ref DBPassword
           JWT_SECRET: your_jwt_secret_here
       Events:
-        # 出于完整性考虑，同样进行精确化改造
         ListUsersApi:
           Type: HttpApi
           Properties:
@@ -393,3 +417,9 @@ Outputs:
   DBEndpoint:
     Description: "Endpoint address of the RDS instance"
     Value: !GetAtt DBInstance.Endpoint.Address
+  FrontendBucketName:
+    Description: "Name of the S3 bucket for the frontend application"
+    Value: !Ref FrontendBucket
+  FrontendURL:
+    Description: "URL for the hosted frontend application"
+    Value: !GetAtt FrontendBucket.WebsiteURL

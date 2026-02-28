@@ -8,10 +8,11 @@
   # Use https://search.nixos.org/packages to find packages
   packages = [
     # THIS IS THE DEFINITIVE FIX:
-    # Create a complete Python 3.11 environment that includes pip.
-    # This ensures that pip is correctly bound to the python interpreter.
+    # Create a complete Python 3.11 environment that includes pip and bcrypt.
+    # This ensures that these packages are correctly bound to the python interpreter.
     (pkgs.python311.withPackages (ps: [
       ps.pip
+      ps.bcrypt # bcrypt is now part of the declarative environment
     ]))
     pkgs.nodejs_20
     pkgs.awscli
@@ -29,7 +30,7 @@
 
   idx = {
     extensions = [
-      "google.gemini-cli-vscode-ide-companion"
+      "google.gemini-cli-vscode-companion"
       "dbaeumer.vscode-eslint"
     ];
 

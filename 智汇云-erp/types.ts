@@ -56,16 +56,40 @@ export type Role = 'admin' | 'sales' | 'warehouse' | 'finance' | 'super_admin';
 
 export type PlanType = 'basic' | 'pro' | 'enterprise';
 
+/**
+ * @interface Plan
+ * @description 定义了订阅方案的数据结构，从API `/admin/plans` 获取。
+ */
+export interface Plan {
+  code: string;       // 方案的唯一代码 (例如: "pro", "enterprise")
+  name: string;       // 方案的显示名称 (例如: "专业版")
+  description: string; // 方案的简要描述
+}
+
+/**
+ * @interface Industry
+ * @description 定义了所属行业的数据结构，从API `/admin/industries` 获取。
+ */
+export interface Industry {
+  id: number;  // 行业的唯一ID
+  name: string; // 行业的名称 (例如: "五金机电")
+}
+
+/**
+ * @interface Tenant
+ * @description (最终修正版) 定义了租户的核心数据结构，与后端API返回的数据完全同步。
+ */
 export interface Tenant {
-  id: string;
-  name: string;
-  domain: string;
-  adminName: string;
-  adminEmail: string;
-  status: 'active' | 'deploying' | 'suspended';
-  createdAt: string;
-  plan: PlanType;
-  industry?: string;
+  id: string;          // 租户的唯一ID
+  name: string;        // 公司或组织名称
+  domain: string;      // 分配的二级域名
+  adminName: string;   // 管理员姓名
+  adminEmail: string;  // 管理员邮箱
+  status: 'active' | 'deploying' | 'suspended'; // 租户状态：'运行中', '部署中', '已停用'
+  createdAt: string;   // 创建时间的 ISO 字符串
+  plan: string;        // 完整的订阅方案名称 (例如: "专业版")
+  planCode: string;    // 订阅方案的唯一代码 (例如: "pro")
+  industry: string;    // 所属行业的名称
 }
 
 export interface User {
@@ -161,12 +185,16 @@ export interface Product {
   status: 'normal' | 'low_stock' | 'out_of_stock';
 }
 
+/**
+ * @interface StatCardProps
+ * @description (最终修正版) 统计卡片组件的属性定义。
+ */
 export interface StatCardProps {
-  title: string;
-  value: string;
-  trend: number;
-  trendLabel: string;
-  icon: React.ReactNode;
-  color: string;
-  onClick?: () => void;
+  title: string;        // 卡片标题
+  value: string;        // 显示的主要数值
+  trend?: number;       // (可选) 趋势百分比，例如 10 或 -5。设为可选以兼容无趋势数据的卡片。
+  trendLabel?: string;  // (可选) 趋势标签，例如 "相比上月"。设为可选以兼容无趋势数据的卡片。
+  icon: React.ReactNode; // 卡片图标
+  color: string;        // 卡片颜色相关的CSS类
+  onClick?: () => void; // (可选) 卡片点击事件
 }
