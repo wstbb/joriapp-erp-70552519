@@ -1,13 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  智汇-ERP后端 (zhihui-erp-backend) V3
+  智汇-ERP后端 (zhihui-erp-backend) V4 - 包含调试函数
 
   一个为多租户ERP系统设计的、采用现代HTTP API架构的SAM模板。
 
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 31
     MemorySize: 256
     Runtime: python3.11
     Architectures:
@@ -70,6 +70,8 @@ Resources:
           - "GET"
           - "POST"
           - "OPTIONS"
+          - "PUT"
+          - "DELETE"
 
   VPC:
     Type: AWS::EC2::VPC
@@ -265,7 +267,7 @@ Resources:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: zhihui-erp-db-utils-layer
-      Description: "Shared utilities layer for database connections"
+      Description: "Shared utilities layer for database connections [FORCED UPDATE V13]"
       ContentUri: backend/lambda/layers/database_utils
       CompatibleRuntimes:
         - python3.11
@@ -321,7 +323,7 @@ Resources:
           DB_NAME: !Ref DBName
           DB_USER: !Ref DBUser
           DB_PASSWORD: !Ref DBPassword
-          JWT_SECRET: your_jwt_secret_here
+          JWT_SECRET: f86b817fd2727c45e842a4bd55855dae2b91b10e29bc7e6dc33ff4024e048ebd
           SUPER_ADMIN_SECRET_ARN: !Ref SuperAdminSecret
       Events:
         LoginApi:
@@ -354,7 +356,7 @@ Resources:
           DB_NAME: !Ref DBName
           DB_USER: !Ref DBUser
           DB_PASSWORD: !Ref DBPassword
-          JWT_SECRET: your_jwt_secret_here
+          JWT_SECRET: f86b817fd2727c45e842a4bd55855dae2b91b10e29bc7e6dc33ff4024e048ebd
       Events:
         GetTenantsApi:
           Type: HttpApi
@@ -368,6 +370,36 @@ Resources:
             ApiId: !Ref ZhiHuiErpHttpApi
             Path: /api/tenants
             Method: POST
+        UpdateTenantStatusApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants/{tenantId}/status
+            Method: PUT
+        UpdateTenantPlanApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants/{tenantId}/plan
+            Method: PUT
+        ResetAdminPasswordApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants/{tenantId}/reset-password
+            Method: POST
+        GetTenantUsageApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants/{tenantId}/usage
+            Method: GET
+        DeleteTenantApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants/{tenantId}
+            Method: DELETE
 
   UsersFunction:
     Type: AWS::Serverless::Function
@@ -392,7 +424,7 @@ Resources:
           DB_NAME: !Ref DBName
           DB_USER: !Ref DBUser
           DB_PASSWORD: !Ref DBPassword
-          JWT_SECRET: your_jwt_secret_here
+          JWT_SECRET: f86b817fd2727c45e842a4bd55855dae2b91b10e29bc7e6dc33ff4024e048ebd
       Events:
         ListUsersApi:
           Type: HttpApi
@@ -405,6 +437,38 @@ Resources:
           Properties:
             ApiId: !Ref ZhiHuiErpHttpApi
             Path: /api/users/{userId}
+            Method: GET
+
+  DebugDbDumpFunction: # <--- 新增的调试函数
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: erp-debug-db-dump-function
+      CodeUri: backend/lambda/debug_dump/
+      Handler: debug_dump.handler
+      Layers:
+        - !Ref DatabaseUtilsLayer
+      Policies:
+        - VPCAccessPolicy: {}
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt DBInstance.Endpoint.Address
+          DB_PORT: !GetAtt DBInstance.Endpoint.Port
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          JWT_SECRET: f86b817fd2727c45e842a4bd55855dae2b91b10e29bc7e6dc33ff4024e048ebd
+      Events:
+        DumpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/debug/dump
             Method: GET
 
 Outputs:

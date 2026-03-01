@@ -2,13 +2,11 @@
 
 -- ####################################################################
 -- #                                                                    #
--- # [V8 - 架构升级] 这是多租户ERP系统的 public schema 定义。          #
+-- # [V13 - 最终修正版] 这是多租户ERP系统的 public schema 定义。          #
 -- #                                                                    #
--- # 核心升级:                                                        #
--- # 1. 新增 `industries`, `features`, `plans` 核心元数据表。         #
--- # 2. 新增 `plan_features` 关联表，实现 Plan -> Features 的动态授权。#
--- # 3. 改造 `tenants` 表，使用外键关联 `plans` 和 `industries`。     #
--- # 4. 预置了初始的行业、功能和订阅方案数据。                        #
+-- # 核心修正:                                                        #
+-- # 1. 彻底移除所有 `ON CONFLICT` 语句，与 V12 版本的 `db_setup.py`    #
+-- #    的 “先查后写” 逻辑保持完全一致，解决部署冲突。                  #
 -- #                                                                    #
 -- ####################################################################
 
@@ -103,31 +101,28 @@ CREATE TRIGGER on_tenant_insert_create_schema
 -- ####################################################################
 
 -- ========= 插入初始行业数据 =========
-INSERT INTO public.industries (name) VALUES ('五金机电'), ('服装鞋帽'), ('餐饮零售'), ('其他') ON CONFLICT (name) DO NOTHING;
+INSERT INTO public.industries (name) SELECT '五金机电' WHERE NOT EXISTS (SELECT 1 FROM public.industries WHERE name='五金机电');
+INSERT INTO public.industries (name) SELECT '服装鞋帽' WHERE NOT EXISTS (SELECT 1 FROM public.industries WHERE name='服装鞋帽');
+INSERT INTO public.industries (name) SELECT '餐饮零售' WHERE NOT EXISTS (SELECT 1 FROM public.industries WHERE name='餐饮零售');
+INSERT INTO public.industries (name) SELECT '其他' WHERE NOT EXISTS (SELECT 1 FROM public.industries WHERE name='其他');
 
 -- ========= 插入初始订阅方案数据 =========
-INSERT INTO public.plans (code, name, description) VALUES 
-('basic', '基础版', '包含核心进销存功能，满足基本日常运营需求'),
-('pro', '专业版', '包含所有基础版功能，并增加移动端App支持和高级报表'),
-('enterprise', '企业版', '包含所有专业版功能，并提供AI智能分析、开放平台和专属客户支持')
-ON CONFLICT (code) DO NOTHING;
+INSERT INTO public.plans (code, name, description) SELECT 'basic', '基础版', '包含核心进销存功能，满足基本日常运营需求' WHERE NOT EXISTS (SELECT 1 FROM public.plans WHERE code='basic');
+INSERT INTO public.plans (code, name, description) SELECT 'pro', '专业版', '包含所有基础版功能，并增加移动端App支持和高级报表' WHERE NOT EXISTS (SELECT 1 FROM public.plans WHERE code='pro');
+INSERT INTO public.plans (code, name, description) SELECT 'enterprise', '企业版', '包含所有专业版功能，并提供AI智能分析、开放平台和专属客户支持' WHERE NOT EXISTS (SELECT 1 FROM public.plans WHERE code='enterprise');
 
 -- ========= 插入初始功能模块数据 =========
--- 数据来源于前端代码 `types.ts` 中的 `Page` 枚举
-INSERT INTO public.features (code, name, description) VALUES
-('DASHBOARD', '仪表盘', '系统主页和数据概览'),
-('PRODUCT_LIST', '商品列表', '管理和查看所有商品信息'),
-('INVENTORY', '库存中心', '管理库存、仓库和调拨'),
-('ORDERS', '订单中心', '管理销售订单和采购订单'),
-('PARTNERS', '往来单位', '管理客户和供应商'),
-('FINANCE', '财务中心', '管理应收应付和发票'),
-('MOBILE_APP', '移动端App', '通过手机App进行核心操作'),
-('AI_ANALYSIS', 'AI智能分析', '基于数据的智能预测和分析'),
-('SAAS_ADMIN', 'SaaS平台管理', '管理租户、订阅和系统设置')
-ON CONFLICT (code) DO NOTHING;
+INSERT INTO public.features (code, name, description) SELECT 'DASHBOARD', '仪表盘', '系统主页和数据概览' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='DASHBOARD');
+INSERT INTO public.features (code, name, description) SELECT 'PRODUCT_LIST', '商品列表', '管理和查看所有商品信息' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='PRODUCT_LIST');
+INSERT INTO public.features (code, name, description) SELECT 'INVENTORY', '库存中心', '管理库存、仓库和调拨' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='INVENTORY');
+INSERT INTO public.features (code, name, description) SELECT 'ORDERS', '订单中心', '管理销售订单和采购订单' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='ORDERS');
+INSERT INTO public.features (code, name, description) SELECT 'PARTNERS', '往来单位', '管理客户和供应商' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='PARTNERS');
+INSERT INTO public.features (code, name, description) SELECT 'FINANCE', '财务中心', '管理应收应付和发票' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='FINANCE');
+INSERT INTO public.features (code, name, description) SELECT 'MOBILE_APP', '移动端App', '通过手机App进行核心操作' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='MOBILE_APP');
+INSERT INTO public.features (code, name, description) SELECT 'AI_ANALYSIS', 'AI智能分析', '基于数据的智能预测和分析' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='AI_ANALYSIS');
+INSERT INTO public.features (code, name, description) SELECT 'SAAS_ADMIN', 'SaaS平台管理', '管理租户、订阅和系统设置' WHERE NOT EXISTS (SELECT 1 FROM public.features WHERE code='SAAS_ADMIN');
 
 -- ========= 绑定方案与功能 =========
--- 使用 CTEs (Common Table Expressions) 来获取ID，使绑定更清晰、更健壮
 DO $$
 DECLARE
     basic_plan_id INT;
@@ -142,7 +137,6 @@ DECLARE
     finance_feature_id INT;
     mobile_app_feature_id INT;
     ai_analysis_feature_id INT;
-    saas_admin_feature_id INT;
 BEGIN
     -- 获取方案ID
     SELECT id INTO basic_plan_id FROM public.plans WHERE code = 'basic';
@@ -158,45 +152,44 @@ BEGIN
     SELECT id INTO finance_feature_id FROM public.features WHERE code = 'FINANCE';
     SELECT id INTO mobile_app_feature_id FROM public.features WHERE code = 'MOBILE_APP';
     SELECT id INTO ai_analysis_feature_id FROM public.features WHERE code = 'AI_ANALYSIS';
-    SELECT id INTO saas_admin_feature_id FROM public.features WHERE code = 'SAAS_ADMIN';
 
     -- 清空旧的绑定关系，以确保幂等性
     DELETE FROM public.plan_features;
 
     -- 基础版功能
-    INSERT INTO public.plan_features (plan_id, feature_id) VALUES
-    (basic_plan_id, dashboard_feature_id),
-    (basic_plan_id, product_list_feature_id),
-    (basic_plan_id, inventory_feature_id),
-    (basic_plan_id, orders_feature_id),
-    (basic_plan_id, partners_feature_id),
-    (basic_plan_id, finance_feature_id)
-    ON CONFLICT DO NOTHING;
+    IF basic_plan_id IS NOT NULL THEN
+        INSERT INTO public.plan_features (plan_id, feature_id) VALUES
+        (basic_plan_id, dashboard_feature_id),
+        (basic_plan_id, product_list_feature_id),
+        (basic_plan_id, inventory_feature_id),
+        (basic_plan_id, orders_feature_id),
+        (basic_plan_id, partners_feature_id),
+        (basic_plan_id, finance_feature_id);
+    END IF;
 
-    -- 专业版功能 (包含基础版 + 新增)
-    INSERT INTO public.plan_features (plan_id, feature_id) VALUES
-    (pro_plan_id, dashboard_feature_id),
-    (pro_plan_id, product_list_feature_id),
-    (pro_plan_id, inventory_feature_id),
-    (pro_plan_id, orders_feature_id),
-    (pro_plan_id, partners_feature_id),
-    (pro_plan_id, finance_feature_id),
-    (pro_plan_id, mobile_app_feature_id) -- Pro 新增
-    ON CONFLICT DO NOTHING;
+    -- 专业版功能
+    IF pro_plan_id IS NOT NULL THEN
+        INSERT INTO public.plan_features (plan_id, feature_id) VALUES
+        (pro_plan_id, dashboard_feature_id),
+        (pro_plan_id, product_list_feature_id),
+        (pro_plan_id, inventory_feature_id),
+        (pro_plan_id, orders_feature_id),
+        (pro_plan_id, partners_feature_id),
+        (pro_plan_id, finance_feature_id),
+        (pro_plan_id, mobile_app_feature_id);
+    END IF;
 
-    -- 企业版功能 (包含专业版 + 新增)
-    INSERT INTO public.plan_features (plan_id, feature_id) VALUES
-    (enterprise_plan_id, dashboard_feature_id),
-    (enterprise_plan_id, product_list_feature_id),
-    (enterprise_plan_id, inventory_feature_id),
-    (enterprise_plan_id, orders_feature_id),
-    (enterprise_plan_id, partners_feature_id),
-    (enterprise_plan_id, finance_feature_id),
-    (enterprise_plan_id, mobile_app_feature_id),
-    (enterprise_plan_id, ai_analysis_feature_id) -- Enterprise 新增
-    ON CONFLICT DO NOTHING;
-
-    -- 注意: SAAS_ADMIN 功能不属于任何租户的plan，它应该由 `superadmin` 的特殊逻辑来控制。
-
+    -- 企业版功能
+    IF enterprise_plan_id IS NOT NULL THEN
+        INSERT INTO public.plan_features (plan_id, feature_id) VALUES
+        (enterprise_plan_id, dashboard_feature_id),
+        (enterprise_plan_id, product_list_feature_id),
+        (enterprise_plan_id, inventory_feature_id),
+        (enterprise_plan_id, orders_feature_id),
+        (enterprise_plan_id, partners_feature_id),
+        (enterprise_plan_id, finance_feature_id),
+        (enterprise_plan_id, mobile_app_feature_id),
+        (enterprise_plan_id, ai_analysis_feature_id);
+    END IF;
 END;
 $$;

@@ -1,21 +1,16 @@
 # backend/lambda/auth/auth.py
 
 # ===================================================================
-# == [最终修复版] 认证服务: 正确的API契约与登录逻辑            ==
+# == [V2 修复版] 认证服务: 修正租户登录字段                    ==
 # ===================================================================
 #
-# 此版本修复了两个核心逻辑错误:
+# 此版本修复了租户登录时的核心错误:
 #
-# 1. **API 契约统一**:
-#    - `tenant_user_login` 现在接受 `username` 而非 `email`，
-#      与前端UI和数据库设计完全匹配。
-#    - 所有登录成功后的响应体，都统一为 `{ "token": "...", "user": { ... } }`
-#      的格式，满足了前端代码的期望。
-#
-# 2. **登录逻辑分离**:
-#    - `handler` 函数现在通过判断 `username == 'superadmin'` 来
-#      优先处理超级管理员登录，彻底将其与租户登录流程分离开，
-#      解决了之前因 `tenantDomain` 字段存在而导致的路由错误。
+# 1. **数据库字段修正**:
+#    - `tenant_user_login` 函数中，查询 users 表的 SQL 语句，
+#      已将 `WHERE username = %s` 修正为 `WHERE name = %s`。
+#    - 从数据库记录中提取用户信息时，已将 `user_record['username']`
+#      修正为 `user_record['name']`。
 #
 # ===================================================================
 
@@ -96,12 +91,18 @@ def super_admin_login(username, password):
         return build_response(401, {"message": "无效的凭据"})
 
 def tenant_user_login(tenant_domain, username, password):
-    """处理租户用户登录逻辑, 使用 username 并返回统一的 {token, user} 对象。"""
+    """处理租户用户登录逻辑, 使用 name 字段并返回统一的 {token, user} 对象。"""
+    # ==================== [START DEBUG LOGGING] ====================
+    print(f"[DEBUG] tenant_user_login: 收到请求: tenant_domain='{tenant_domain}', username='{username}', password='{password}'")
+    # ===================== [END DEBUG LOGGING] =====================
     public_conn = None
     tenant_conn = None
     try:
         public_conn = get_public_connection()
         if not public_conn:
+            # ==================== [START DEBUG LOGGING] ====================
+            print("[ERROR] tenant_user_login: get_public_connection() 返回了 None。")
+            # ===================== [END DEBUG LOGGING] =====================
             return build_response(503, {"message": "无法连接到认证服务"})
 
         with public_conn.cursor() as cur:
@@ -109,36 +110,72 @@ def tenant_user_login(tenant_domain, username, password):
             tenant_data = cur.fetchone()
         
         if not tenant_data:
+            # ==================== [START DEBUG LOGGING] ====================
+            print(f"[ERROR] tenant_user_login: 在 public.tenants 中未找到域为 '{tenant_domain}' 的租户。")
+            # ===================== [END DEBUG LOGGING] =====================
             return build_response(404, {"message": f"域为 '{tenant_domain}' 的租户不存在"})
         
         schema_name, tenant_id, status = tenant_data
+        # ==================== [START DEBUG LOGGING] ====================
+        print(f"[DEBUG] tenant_user_login: 成功从 public.tenants 获取到租户信息. Schema='{schema_name}', ID='{tenant_id}', 状态='{status}'")
+        # ===================== [END DEBUG LOGGING] =====================
+
         if status != 'active':
+            # ==================== [START DEBUG LOGGING] ====================
+            print(f"[ERROR] tenant_user_login: 租户 '{tenant_domain}' 状态为 '{status}', 非 'active'。")
+            # ===================== [END DEBUG LOGGING] =====================
             return build_response(403, {"message": f"租户 '{tenant_domain}' 当前未激活"})
 
         tenant_conn = get_tenant_db_connection(schema_name)
         if not tenant_conn:
+             # ==================== [START DEBUG LOGGING] ====================
+             print(f"[ERROR] tenant_user_login: get_tenant_db_connection('{schema_name}') 返回了 None。")
+             # ===================== [END DEBUG LOGGING] =====================
              return build_response(503, {"message": "无法连接到租户数据库"})
 
+        with tenant_conn.cursor() as cur:
+            cur.execute(f'''SET search_path TO \"{schema_name}\", public;''')
+            # ==================== [START DEBUG LOGGING] ====================
+            print(f"[DEBUG] tenant_user_login: 已为当前连接成功执行 SET search_path TO \"{schema_name}\"。")
+            # ===================== [END DEBUG LOGGING] =====================
+
         with tenant_conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute("SELECT * FROM users WHERE username = %s;", (username,))
+            # [修正] 使用 `name` 而非 `username` 进行查询
+            cur.execute("SELECT * FROM users WHERE name = %s;", (username,))
             user_record = cur.fetchone()
 
         if not user_record:
+            # ==================== [START DEBUG LOGGING] ====================
+            print(f"[ERROR] tenant_user_login: 在 schema '{schema_name}' 中执行查询后，未能找到用户 '{username}'。user_record is None。")
+            # ===================== [END DEBUG LOGGING] =====================
             return build_response(401, {"message": "无效的凭据"})
         
+        # ==================== [START DEBUG LOGGING] ====================
+        print(f"[DEBUG] tenant_user_login: 成功找到用户记录: {dict(user_record)}")
+        # ===================== [END DEBUG LOGGING] =====================
+        
         password_hash = user_record['password_hash']
+        # ==================== [START DEBUG LOGGING] ====================
+        print(f"[DEBUG] tenant_user_login: 用于校验的 password (明文): '{password}'")
+        print(f"[DEBUG] tenant_user_login: 用于校验的 password_hash (来自DB): '{password_hash}'")
+        # ===================== [END DEBUG LOGGING] =====================
 
-        if bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
+        is_password_correct = bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+        # ==================== [START DEBUG LOGGING] ====================
+        print(f"[DEBUG] tenant_user_login: bcrypt.checkpw 密码比对结果: {is_password_correct}")
+        # ===================== [END DEBUG LOGGING] =====================
+
+        if is_password_correct:
             user_object = {
                 "id": user_record["id"],
-                "username": user_record["username"],
+                "username": user_record["name"], # [修正] 从 `name` 字段获取用户名
                 "email": user_record["email"],
                 "createdAt": user_record["created_at"].isoformat()
             }
             payload = {
                 "user_id": user_record["id"],
                 "tenant_id": tenant_id,
-                "username": user_record["username"],
+                "username": user_record["name"], # [修正] 从 `name` 字段获取用户名
                 "exp": datetime.utcnow() + timedelta(hours=24)
             }
             token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")

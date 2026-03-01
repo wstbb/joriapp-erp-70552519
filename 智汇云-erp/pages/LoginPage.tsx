@@ -89,8 +89,10 @@ const DesktopLogin: React.FC<DesktopLoginProps> = ({ onLogin, onSwitchToMobile }
         setLoading(true);
         setError('');
         try {
-            const tenantIdentifier = isSuperAdmin ? 'superadmin' : selectedTenant;
-            const user = await login(usernameInput, loginPassword, tenantIdentifier);
+            // [V2 已修复] 核心 Bug 修复：
+            // - 当是超级管理员时, `tenantDomain` 参数必须为 `undefined`，以发送一个“干净”的请求。
+            // - 当是租户用户时, 传递 `selectedTenant`。
+            const user = await login(usernameInput, loginPassword, isSuperAdmin ? undefined : selectedTenant);
             onLogin(user);
         } catch (err) {
             setError(getErrorMessage(err));

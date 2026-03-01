@@ -1,6 +1,4 @@
 
-import React from 'react';
-
 export enum Page {
   DASHBOARD = 'DASHBOARD',
   PRODUCTS = 'PRODUCTS', 
@@ -77,18 +75,18 @@ export interface Industry {
 
 /**
  * @interface Tenant
- * @description (最终修正版) 定义了租户的核心数据结构，与后端API返回的数据完全同步。
+ * @description (规范化修正版) 定义了租户的核心数据结构，字段命名与数据库 schema (snake_case) 完全一致。
  */
 export interface Tenant {
   id: string;          // 租户的唯一ID
   name: string;        // 公司或组织名称
   domain: string;      // 分配的二级域名
-  adminName: string;   // 管理员姓名
-  adminEmail: string;  // 管理员邮箱
+  admin_name: string;  // 管理员姓名 (snake_case)
+  admin_email: string; // 管理员邮箱 (snake_case)
   status: 'active' | 'deploying' | 'suspended'; // 租户状态：'运行中', '部署中', '已停用'
-  createdAt: string;   // 创建时间的 ISO 字符串
+  created_at: string;  // 创建时间的 ISO 字符串 (snake_case)
   plan: string;        // 完整的订阅方案名称 (例如: "专业版")
-  planCode: string;    // 订阅方案的唯一代码 (例如: "pro")
+  plan_code: string;   // 订阅方案的唯一代码 (snake_case)
   industry: string;    // 所属行业的名称
 }
 
@@ -187,14 +185,14 @@ export interface Product {
 
 /**
  * @interface StatCardProps
- * @description (最终修正版) 统计卡片组件的属性定义。
+ * @description (语法修正版) 统计卡片组件的属性定义。
  */
 export interface StatCardProps {
   title: string;        // 卡片标题
   value: string;        // 显示的主要数值
-  trend?: number;       // (可选) 趋势百分比，例如 10 或 -5。设为可选以兼容无趋势数据的卡片。
-  trendLabel?: string;  // (可选) 趋势标签，例如 "相比上月"。设为可选以兼容无趋势数据的卡片。
-  icon: React.ReactNode; // 卡片图标
+  trend?: number;       // (可选) 趋势百分比，例如 10 或 -5。
+  trendLabel?: string;  // (可选) 趋势标签，例如 "相比上月"。
+  icon: any;            // 卡片图标 (类型修正为 any)
   color: string;        // 卡片颜色相关的CSS类
   onClick?: () => void; // (可选) 卡片点击事件
 }

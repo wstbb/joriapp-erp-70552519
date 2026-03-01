@@ -1,40 +1,57 @@
--- [V7 - 终极幂等版 - 密码已修正]
--- 职责: 向当前指定的 schema 中插入标准的业务和用户数据。
--- 特性: 全面使用 ON CONFLICT DO NOTHING/UPDATE 保证重复执行的安全性。
--- 注释: 用户的密码哈希值已根据 '123456' 重新生成。
+-- [V9 - 密码修复版]
+-- 职责: 插入标准数据，并强制修正 admin 用户的密码哈希。
 
--- 注意：search_path 应该由调用此脚本的 db_setup.py 程序来设置。
-
--- 插入核心用户，如果 email 已存在，则什么都不做
+-- 插入或更新 admin 用户
+-- 使用 ON CONFLICT 确保无论用户是否存在，其密码哈希都会被更新为正确的值。
 -- 密码 '123456' 对应的哈希值
-INSERT INTO users (name, email, password_hash, role) VALUES
-('admin', 'admin@example.com', '$2b$12$E1J6bK/YJOBm9c0NOYPqk.Eq8aY4hAAmAq8PPdSUq47i2AoN/W9am', 'admin'),
-('wh', 'wh@example.com', '$2b$12$E1J6bK/YJOBm9c0NOYPqk.Eq8aY4hAAmAq8PPdSUq47i2AoN/W9am', 'warehouse'),
-('fin', 'fin@example.com', '$2b$12$E1J6bK/YJOBm9c0NOYPqk.Eq8aY4hAAmAq8PPdSUq47i2AoN/W9am', 'finance')
-ON CONFLICT (email) DO NOTHING;
+INSERT INTO users (name, email, password_hash, role)
+VALUES ('admin', 'admin@example.com', '$2b$12$E1J6bK/YJOBm9c0NOYPqk.Eq8aY4hAAmAq8PPdSUq47i2AoN/W9am', 'admin')
+ON CONFLICT (email) 
+DO UPDATE SET password_hash = EXCLUDED.password_hash;
+
+-- 插入其他用户，如果 email 已存在，则什么都不做
+INSERT INTO users (name, email, password_hash, role)
+SELECT 'wh', 'wh@example.com', '$2b$12$E1J6bK/YJOBm9c0NOYPqk.Eq8aY4hAAmAq8PPdSUq47i2AoN/W9am', 'warehouse'
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'wh@example.com');
+
+INSERT INTO users (name, email, password_hash, role)
+SELECT 'fin', 'fin@example.com', '$2b$12$E1J6bK/YJOBm9c0NOYPqk.Eq8aY4hAAmAq8PPdSUq47i2AoN/W9am', 'finance'
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'fin@example.com');
+
 
 -- 插入默认分类，如果已存在则跳过
-INSERT INTO categories (name) VALUES ('默认分类') ON CONFLICT (name) DO NOTHING;
+INSERT INTO categories (name)
+SELECT '默认分类' WHERE NOT EXISTS (SELECT 1 FROM categories WHERE name = '默认分类');
 
 -- 插入默认仓库，如果已存在则跳过
-INSERT INTO warehouses (name, location) VALUES ('默认仓库', '中心城区') ON CONFLICT (name) DO NOTHING;
+INSERT INTO warehouses (name, location)
+SELECT '默认仓库', '中心城区' WHERE NOT EXISTS (SELECT 1 FROM warehouses WHERE name = '默认仓库');
 
 -- 插入示例产品，如果 sku 已存在则跳过
--- 使用 CTE 获取 category_id，避免硬编码
-WITH default_category AS (
-  SELECT id FROM categories WHERE name = '默认分类' LIMIT 1
-)
-INSERT INTO products (category_id, sku, name, specs, unit, base_price, cost_price)
-SELECT id, 'SKU-001', '示例产品', '红色, 500g', '件', 199.99, 99.99 FROM default_category
-ON CONFLICT (sku) DO NOTHING;
+DO $$
+DECLARE
+    default_cat_id INT;
+BEGIN
+    SELECT id INTO default_cat_id FROM categories WHERE name = '默认分类' LIMIT 1;
+    IF default_cat_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM products WHERE sku = 'SKU-001') THEN
+        INSERT INTO products (category_id, sku, name, specs, unit, base_price, cost_price)
+        VALUES (default_cat_id, 'SKU-001', '示例产品', '红色, 500g', '件', 199.99, 99.99);
+    END IF;
+END;
+$$;
 
--- 插入初始库存，如果已存在则更新数量（这里选择更新，也可以选择 DO NOTHING）
--- 使用 CTE 获取 product_id 和 warehouse_id
-WITH target_refs AS (
-  SELECT p.id AS product_id, w.id AS warehouse_id
-  FROM products p, warehouses w
-  WHERE p.sku = 'SKU-001' AND w.name = '默认仓库'
-)
-INSERT INTO inventory (product_id, warehouse_id, quantity)
-SELECT product_id, warehouse_id, 100 FROM target_refs
-ON CONFLICT (product_id, warehouse_id) DO UPDATE SET quantity = EXCLUDED.quantity;
+-- 插入初始库存，如果已存在则跳过
+DO $$
+DECLARE
+    prod_id INT;
+    wh_id INT;
+BEGIN
+    SELECT id INTO prod_id FROM products WHERE sku = 'SKU-001' LIMIT 1;
+    SELECT id INTO wh_id FROM warehouses WHERE name = '默认仓库' LIMIT 1;
+
+    IF prod_id IS NOT NULL AND wh_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM inventory WHERE product_id = prod_id AND warehouse_id = wh_id) THEN
+        INSERT INTO inventory (product_id, warehouse_id, quantity)
+        VALUES (prod_id, wh_id, 100);
+    END IF;
+END;
+$$;

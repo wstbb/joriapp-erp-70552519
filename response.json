@@ -1,1 +1,1 @@
-{"statusCode": 500, "body": "\u5904\u7406\u5931\u8d25: duplicate key value violates unique constraint \"users_email_key\"\nDETAIL:  Key (email)=(admin@example.com) already exists.\n"}
+{"statusCode": 200, "body": "\u6570\u636e\u5e93\u548c\u6240\u6709\u79df\u6237\u5df2\u6210\u529f\u521d\u59cb\u5316\u3002"}

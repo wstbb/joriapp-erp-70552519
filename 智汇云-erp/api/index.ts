@@ -32,30 +32,36 @@ export const getTenants = async (): Promise<Tenant[]> => {
 };
 
 /**
- * Login function to authenticate a user for a specific tenant.
- * @param username The user's username.
- * @param password The user's password.
- * @param tenantDomain The domain of the tenant the user is trying to log into.
- * @returns The user object from the backend.
+ * [V2 - 已修复] 登录函数，用于验证用户身份。
+ * - 对于租户用户, `tenantDomain` 是必需的。
+ * - 对于超级管理员, `tenantDomain` 必须被省略。
+ * @param username 用户的登录名。
+ * @param password 用户的密码。
+ * @param tenantDomain (可选) 用户试图登录的租户域。
+ * @returns 后端返回的用户对象。
  */
-export const login = async (username: string, password: string, tenantDomain: string): Promise<User> => {
+export const login = async (username: string, password: string, tenantDomain?: string): Promise<User> => {
   try {
-    // The path MUST match the route key in API Gateway, which is /api/auth/login
-    // The request body now includes the tenantDomain.
-    const response = await apiClient.post('/api/auth/login', { username, password, tenantDomain });
+    // 动态构建请求体
+    const payload: { [key: string]: string } = { username, password };
+    if (tenantDomain) {
+      payload.tenantDomain = tenantDomain;
+    }
+
+    const response = await apiClient.post('/api/auth/login', payload);
     
     if (response.data.token && response.data.user) {
-      // Store the token to maintain the session across page reloads.
+      // 在 localStorage 中存储 token 以在页面重新加载后保持会话。
       localStorage.setItem('token', response.data.token);
       
-      // Set the Authorization header for all subsequent API calls in this session.
+      // 为此会话中的所有后续 API 调用设置 Authorization 头。
       apiClient.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
       
-      // Return the user object to the caller (LoginPage -> App), which will trigger the redirect.
+      // 将用户对象返回给调用方 (LoginPage -> App)，这将触发页面跳转。
       return response.data.user;
     } else {
-      // If the response is malformed, throw an error.
-      throw new Error('Login response is missing token or user data.');
+      // 如果响应格式不正确，则抛出错误。
+      throw new Error('登录响应缺少 token 或用户数据。');
     }
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
