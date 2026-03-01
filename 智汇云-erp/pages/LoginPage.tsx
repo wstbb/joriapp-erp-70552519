@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { Icons } from '@/components/Icons';
-import { User, Tenant } from '@/types';
-import { login, getTenants } from '@/api';
+import { Icons } from '../components/Icons';
+import { User, Tenant } from '../types';
+import { login, getTenants } from '../api';
 
 const getErrorMessage = (error: unknown): string => {
     if (error instanceof Error) {
@@ -190,7 +190,7 @@ const MobileLogin: React.FC<MobileLoginProps> = ({ onLogin, onSwitchToDesktop })
         setError('');
         try {
             // Here we might need a default tenant or a different login flow for mobile
-            const user = await login(usernameInput, loginPassword, 'YOUR_DEFAULT_TENANT_DOMAIN'); // TODO: Define default tenant for mobile
+            const user = await login(usernameInput, loginPassword, 'demo');
             onLogin(user);
         } catch (err) {
             setError(getErrorMessage(err));

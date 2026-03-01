@@ -16,7 +16,9 @@ const TenantConsolePage: React.FC = () => {
     const navigate = useNavigate();
 
     const [tenant, setTenant] = useState<Tenant | null>(null);
-    const [usage, setUsage] = useState<{ userCount: number; storageSize: string; } | null>(null);
+    const [usage, setUsage] = useState<{ userCount: number; storageSize: string; maxUsers?: number; maxStorageGb?: number; aiCallsPerDay?: number; storageBytes?: number } | null>(null);
+    const [history, setHistory] = useState<{ id: number; action: string; changed_by: string; changed_at: string; payload?: unknown }[]>([]);
+    const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
     const [isLoading, setIsLoading] = useState(true);
     const [isUpdating, setIsUpdating] = useState(false);
 
@@ -29,8 +31,12 @@ const TenantConsolePage: React.FC = () => {
             
             if (currentTenant) {
                 setTenant(currentTenant);
-                const usageRes = await apiClient.get(`/api/tenants/${tenantId}/usage`);
+                const [usageRes, historyRes] = await Promise.all([
+                    apiClient.get(`/api/tenants/${tenantId}/usage`),
+                    apiClient.get(`/api/tenants/${tenantId}/history`).catch(() => ({ data: [] })),
+                ]);
                 setUsage(usageRes.data);
+                setHistory(Array.isArray(historyRes.data) ? historyRes.data : []);
             } else {
                 throw new Error('找不到指定的租户');
             }
@@ -96,7 +102,7 @@ const TenantConsolePage: React.FC = () => {
                 await apiClient.delete(`/api/tenants/${tenant.id}`);
                 alert("租户已永久删除。");
                 // 修正 #3: 使用 navigate进行页面跳转
-                navigate('/saas-admin');
+                navigate('/saasadmin');
             } catch (error) {
                 alert(`删除失败: ${(error as any).response?.data?.message || (error as Error).message}`);
             }
@@ -111,7 +117,7 @@ const TenantConsolePage: React.FC = () => {
              <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center"> 
                 <div className="flex items-center gap-4">
                     {/* 修正 #4: 使用 react-router-dom 的 Link 写法 */}
-                    <Link to="/saas-admin" className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                    <Link to="/saasadmin" className="p-2 hover:bg-gray-200 rounded-full transition-colors">
                        <Icons.ArrowLeft className="w-5 h-5 text-gray-600"/>
                     </Link>
                     <div>
@@ -141,7 +147,7 @@ const TenantConsolePage: React.FC = () => {
                             <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase">订阅方案</label>
                                     <div className="mt-1 flex items-center gap-2">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold border 'bg-gray-50 text-gray-600 border-gray-200'}`}>{tenant.plan}</span>
+                                        <span className="px-2 py-1 rounded text-xs font-bold bg-gray-50 text-gray-600 border border-gray-200">{tenant.plan}</span>
                                         <button onClick={handlePlanChange} disabled={isUpdating} className="text-xs text-primary-600 hover:underline disabled:text-gray-400">变更</button>
                                     </div>
                                 </div>
@@ -150,11 +156,38 @@ const TenantConsolePage: React.FC = () => {
                         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                             <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Icons.Activity className="w-5 h-5 text-gray-400"/> 资源用量</h3>
                             {usage ? (
-                                <div className="space-y-6"> 
-                                    <div><div className="flex justify-between text-sm mb-1"><span className="text-gray-600">用户数</span><span className="font-bold text-gray-900">{usage.userCount}</span></div></div>
-                                    <div><div className="flex justify-between text-sm mb-1"><span className="text-gray-600">存储空间</span><span className="font-bold text-gray-900">{usage.storageSize}</span></div></div>
+                                <div className="space-y-6">
+                                    <div><div className="flex justify-between text-sm mb-1"><span className="text-gray-600">用户数</span><span className="font-bold text-gray-900">{usage.maxUsers != null ? `${usage.userCount} / ${usage.maxUsers}` : usage.userCount}</span></div></div>
+                                    <div><div className="flex justify-between text-sm mb-1"><span className="text-gray-600">存储空间</span><span className="font-bold text-gray-900">{usage.maxStorageGb != null ? `${usage.storageSize} / ${usage.maxStorageGb} GB` : usage.storageSize}</span></div></div>
+                                    {usage.aiCallsPerDay != null && <div><div className="flex justify-between text-sm mb-1"><span className="text-gray-600">AI 调用/日</span><span className="font-bold text-gray-900">限额 {usage.aiCallsPerDay} 次</span></div></div>}
                                 </div>
                             ) : <p className="text-sm text-gray-500">加载用量数据中...</p>}
+                            {tenant?.domain && (
+                                <div className="mt-4 pt-4 border-t border-gray-100">
+                                    <p className="text-xs font-bold text-gray-500 uppercase mb-1">登录地址</p>
+                                    <p className="text-sm font-medium text-gray-900">{tenant.domain}</p>
+                                    <button type="button" onClick={async () => { try { await apiClient.post(`/api/tenants/${tenant.id}/provision-subdomain`); alert('子域名部署功能即将开放，敬请期待。'); } catch (e: any) { alert(e?.response?.data?.message || '操作失败'); } }} className="mt-2 text-xs text-primary-600 font-bold hover:underline">部署子域名（即将开放）</button>
+                                </div>
+                            )}
+                        </div>
+                        <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                            <div className="flex gap-4 border-b border-gray-200 mb-4">
+                                <button type="button" onClick={() => setActiveTab('info')} className={`pb-2 text-sm font-medium ${activeTab === 'info' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}>基础信息与用量</button>
+                                <button type="button" onClick={() => setActiveTab('history')} className={`pb-2 text-sm font-medium ${activeTab === 'history' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}>变更历史</button>
+                            </div>
+                            {activeTab === 'info' && <p className="text-sm text-gray-500">以上为当前基础信息与资源用量。</p>}
+                            {activeTab === 'history' && (
+                                <div className="space-y-2 max-h-64 overflow-y-auto">
+                                    {history.length === 0 ? <p className="text-sm text-gray-500">暂无变更记录</p> : history.map((h) => (
+                                        <div key={h.id} className="flex items-start gap-2 text-sm py-2 border-b border-gray-100 last:border-0">
+                                            <span className="text-gray-500 shrink-0">{h.changed_at?.replace('T', ' ').slice(0, 19)}</span>
+                                            <span className="font-medium">{h.action === 'created' ? '创建' : '更新'}</span>
+                                            <span className="text-gray-600">{h.changed_by}</span>
+                                            {h.payload && <span className="text-gray-500 truncate">{JSON.stringify(h.payload)}</span>}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                         <div className="lg:col-span-3 bg-red-50 rounded-xl border border-red-100 p-6">
                             <h3 className="font-bold text-red-800">危险区域</h3>

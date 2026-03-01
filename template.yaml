@@ -299,6 +299,37 @@ Resources:
           DB_USER: !Ref DBUser
           DB_PASSWORD: !Ref DBPassword
 
+  DbSetupInvokerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: erp-db-setup-invoker
+      CodeUri: backend/lambda/db_setup_invoker/
+      Handler: db_setup_invoker.handler
+      Runtime: python3.11
+      Timeout: 120
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub "${DbSetupFunction.Arn}"
+
+  DbSetupInvokerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DbSetupInvokerFunction
+      Action: lambda:InvokeFunction
+      Principal: cloudformation.amazonaws.com
+
+  DbSetupCustomResource:
+    Type: Custom::DbSetup
+    DependsOn:
+      - DbSetupFunction
+      - DBInstance
+    Properties:
+      ServiceToken: !GetAtt DbSetupInvokerFunction.Arn
+      DbSetupFunctionName: !Ref DbSetupFunction
+
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -426,6 +457,18 @@ Resources:
             ApiId: !Ref ZhiHuiErpHttpApi
             Path: /api/tenants/{tenantId}/usage
             Method: GET
+        GetTenantHistoryApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants/{tenantId}/history
+            Method: GET
+        ProvisionSubdomainApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tenants/{tenantId}/provision-subdomain
+            Method: POST
         DeleteTenantApi:
           Type: HttpApi
           Properties:
@@ -464,12 +507,56 @@ Resources:
             ApiId: !Ref ZhiHuiErpHttpApi
             Path: /api/users
             Method: GET
+        CreateUserApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/users
+            Method: POST
         GetUserApi:
           Type: HttpApi
           Properties:
             ApiId: !Ref ZhiHuiErpHttpApi
             Path: /api/users/{userId}
             Method: GET
+
+  TicketsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: erp-tickets-function
+      CodeUri: backend/lambda/tickets/
+      Handler: tickets.handler
+      Layers:
+        - !Ref DatabaseUtilsLayer
+      Policies:
+        - VPCAccessPolicy: {}
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt DBInstance.Endpoint.Address
+          DB_PORT: !GetAtt DBInstance.Endpoint.Port
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          JWT_SECRET: f86b817fd2727c45e842a4bd55855dae2b91b10e29bc7e6dc33ff4024e048ebd
+      Events:
+        TicketsListCreateApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tickets
+            Method: ANY
+        TicketsDetailApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /api/tickets/{proxy+}
+            Method: ANY
 
   DebugDbDumpFunction:
     Type: AWS::Serverless::Function

@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 // 修正 #1: 从 react-router-dom 导入 useNavigate
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import apiClient from '../../api'; 
 import { Icons } from '../../components/Icons';
 import { Tenant, Plan, Industry } from '../../types';
@@ -21,7 +21,7 @@ const SaasAdminDashboard: React.FC<{ onLogout: () => void; }> = ({ onLogout }) =
 
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [creationResult, setCreationResult] = useState<{ tenant: Tenant, password?: string } | null>(null);
+    const [creationResult, setCreationResult] = useState<{ tenant: { id: string; name: string; domain: string; admin_name?: string; admin_email?: string }; password?: string } | null>(null);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -65,8 +65,8 @@ const SaasAdminDashboard: React.FC<{ onLogout: () => void; }> = ({ onLogout }) =
 
         try {
             const response = await apiClient.post('/api/tenants', payload);
-            setCreationResult(response.data);
-            await refreshTenants(); 
+            setCreationResult(response.data as { tenant: { id: string; name: string; domain: string }; password?: string });
+            await refreshTenants();
         } catch (error) {
             console.error("创建租户失败:", error);
             alert(`创建失败: ${(error as any).response?.data?.message || (error as Error).message}`);
@@ -82,7 +82,7 @@ const SaasAdminDashboard: React.FC<{ onLogout: () => void; }> = ({ onLogout }) =
 
     const navigateToTenantConsole = (tenantId: string) => {
         // 修正 #3: 使用 navigate 进行页面跳转
-        navigate(`/saas-admin/tenants/${tenantId}`);
+        navigate(`/saasadmin/tenants/${tenantId}`);
     };
 
     return (
@@ -94,9 +94,27 @@ const SaasAdminDashboard: React.FC<{ onLogout: () => void; }> = ({ onLogout }) =
 
             <main className="max-w-7xl mx-auto p-8">
                 <div className="animate-fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
                         <StatCard title="总租户" value={isLoading ? "..." : tenants.length.toString()} icon={<Icons.Users className="w-6 h-6 text-primary-600" />} color="bg-primary-50" />
                         <StatCard title="活跃租户" value={isLoading ? "..." : tenants.filter(t=>t.status==='active').length.toString()} icon={<Icons.Activity className="w-6 h-6 text-green-600" />} color="bg-green-50" />
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                        <Link to="/saasadmin" className="flex items-center gap-3 p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-primary-500 hover:shadow transition-all">
+                            <Icons.Users className="w-8 h-8 text-primary-600" />
+                            <span className="font-medium text-gray-900">租户管理</span>
+                        </Link>
+                        <Link to="/saasadmin/plans" className="flex items-center gap-3 p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-primary-500 hover:shadow transition-all">
+                            <Icons.FileText className="w-8 h-8 text-primary-600" />
+                            <span className="font-medium text-gray-900">订阅方案</span>
+                        </Link>
+                        <Link to="/saasadmin/industries" className="flex items-center gap-3 p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-primary-500 hover:shadow transition-all">
+                            <Icons.Briefcase className="w-8 h-8 text-primary-600" />
+                            <span className="font-medium text-gray-900">行业管理</span>
+                        </Link>
+                        <Link to="/saasadmin/tickets" className="flex items-center gap-3 p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-primary-500 hover:shadow transition-all">
+                            <Icons.HelpCircle className="w-8 h-8 text-primary-600" />
+                            <span className="font-medium text-gray-900">工单中心</span>
+                        </Link>
                     </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                         <div className="p-6 border-b flex justify-between items-center">

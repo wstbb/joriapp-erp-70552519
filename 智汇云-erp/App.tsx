@@ -21,7 +21,7 @@ import { Page, User, Role, Ticket } from './types';
 import { Icons } from './components/Icons';
 import { LoginPage } from './pages/LoginPage';
 import { MobileApp } from './pages/MobileApp';
-import { SaasAdmin } from './pages/SaasAdmin';
+import SaasAdmin from './pages/SaasAdmin';
 import apiClient from './api'; // 【修正】导入 apiClient 以便访问 token
 
 const MOCK_TICKETS: Ticket[] = [
@@ -31,7 +31,12 @@ const MOCK_TICKETS: Ticket[] = [
 
 // ... 其他组件保持不变 ...
 const SuccessPage: React.FC<{ title: string, sub: string, back: () => void }> = ({ title, sub, back }) => ( <div/> );
-const UnauthorizedPage: React.FC<{ back: () => void }> = ({ back }) => ( <div/> );
+const UnauthorizedPage: React.FC<{ back: () => void }> = ({ back }) => (
+  <div className="flex flex-col items-center justify-center min-h-[50vh] text-gray-500">
+    <p className="mb-4">您没有权限访问该页面。</p>
+    <button type="button" onClick={back} className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700">返回仪表盘</button>
+  </div>
+);
 
 const ROLE_ACCESS: Record<string, Role[]> = {
     [Page.DASHBOARD]: ['admin', 'sales', 'warehouse', 'finance'],
@@ -146,12 +151,13 @@ function App() {
 
   const hasAccess = (page: Page): boolean => {
       if (!user) return false;
-      if(user.is_super_admin) return page === Page.SAAS_ADMIN;
-      if(page === Page.SAAS_ADMIN) return false;
+      if (user.is_super_admin) return page === Page.SAAS_ADMIN;
+      if (page === Page.SAAS_ADMIN) return false;
 
       const allowedRoles = ROLE_ACCESS[page];
       if (!allowedRoles) return false;
-      return user.role ? allowedRoles.includes(user.role) : false;
+      const role = user.role || 'admin';
+      return allowedRoles.includes(role);
   };
 
   const renderPage = () => {

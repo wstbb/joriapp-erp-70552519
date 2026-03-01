@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Icons } from '../components/Icons';
 import { Page, User, Ticket } from '../types';
+import apiClient from '../api';
 
 interface PageProps {
     setPage?: (page: Page) => void;
@@ -869,24 +870,38 @@ export const Settings: React.FC<PageProps> = ({ user, onAddTicket }) => {
         desc: ''
     });
 
-    const handleSubmitTicket = (e: React.FormEvent) => {
+    const [ticketSubmitting, setTicketSubmitting] = useState(false);
+    const handleSubmitTicket = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!onAddTicket) return;
-
-        const newTicket: Ticket = {
-            id: `TK-${Date.now().toString().slice(-4)}`,
-            tenantName: user?.tenantName || '未知租户',
-            type: ticketForm.type as any,
-            title: ticketForm.title,
-            description: ticketForm.desc,
-            priority: ticketForm.priority as any,
-            status: 'pending',
-            date: new Date().toLocaleString()
-        };
-
-        onAddTicket(newTicket);
-        alert('工单提交成功！我们将尽快处理。');
-        setTicketForm({ type: 'bug', title: '', priority: 'medium', desc: '' });
+        setTicketSubmitting(true);
+        try {
+            await apiClient.post('/api/tickets', {
+                contact_email: user?.email || '',
+                subject: ticketForm.title,
+                type: ticketForm.type,
+                priority: ticketForm.priority,
+                body: ticketForm.desc,
+            });
+            alert('工单提交成功！我们将尽快处理。');
+            setTicketForm({ type: 'bug', title: '', priority: 'medium', desc: '' });
+            if (onAddTicket) {
+                const newTicket: Ticket = {
+                    id: `TK-${Date.now().toString().slice(-4)}`,
+                    tenantName: user?.tenantName || '未知租户',
+                    type: ticketForm.type as any,
+                    title: ticketForm.title,
+                    description: ticketForm.desc,
+                    priority: ticketForm.priority as any,
+                    status: 'pending',
+                    date: new Date().toLocaleString(),
+                };
+                onAddTicket(newTicket);
+            }
+        } catch (err: any) {
+            alert('提交失败：' + (err?.response?.data?.message || err?.message || '请稍后重试'));
+        } finally {
+            setTicketSubmitting(false);
+        }
     };
 
     return (
@@ -1011,8 +1026,8 @@ export const Settings: React.FC<PageProps> = ({ user, onAddTicket }) => {
                                 ></textarea>
                             </div>
                             <div className="pt-2 flex justify-end">
-                                <button type="submit" className="px-6 py-2 bg-primary-600 text-white rounded-lg text-sm font-bold shadow-sm hover:bg-primary-700 flex items-center gap-2">
-                                    <Icons.Send className="w-4 h-4"/> 提交工单
+                                <button type="submit" disabled={ticketSubmitting} className="px-6 py-2 bg-primary-600 text-white rounded-lg text-sm font-bold shadow-sm hover:bg-primary-700 flex items-center gap-2 disabled:opacity-50">
+                                    <Icons.Send className="w-4 h-4"/> {ticketSubmitting ? '提交中...' : '提交工单'}
                                 </button>
                             </div>
                         </form>

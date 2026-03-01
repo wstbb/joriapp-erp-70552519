@@ -166,11 +166,16 @@ def tenant_user_login(tenant_domain, username, password):
         # ===================== [END DEBUG LOGGING] =====================
 
         if is_password_correct:
+            role = (user_record.get("role") or "staff").strip().lower()
             user_object = {
-                "id": user_record["id"],
-                "username": user_record["name"], # [修正] 从 `name` 字段获取用户名
+                "id": str(user_record["id"]),
+                "username": user_record["name"],
+                "name": user_record["name"],
+                "fullName": user_record.get("name") or user_record["email"],
                 "email": user_record["email"],
-                "createdAt": user_record["created_at"].isoformat()
+                "role": role if role in ("admin", "sales", "warehouse", "finance") else "staff",
+                "tenant_id": str(tenant_id),
+                "createdAt": user_record["created_at"].isoformat() if user_record.get("created_at") else None,
             }
             payload = {
                 "user_id": user_record["id"],

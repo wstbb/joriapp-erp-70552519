@@ -50,6 +50,9 @@ def handler(event, context):
             host=db_host, port=db_port, dbname=db_name, user=db_user, password=db_password
         )
         with conn.cursor() as cur:
+            cur.execute("SELECT current_database() AS db;")
+            conn_db = cur.fetchone()[0]
+            logger.info(f"[DBSETUP_DEBUG] connected host={db_host} port={db_port} dbname={db_name} current_database={conn_db}")
             logger.info("数据库连接成功，事务开始。")
 
             # Step 1 & 2: 执行SQL定义 (幂等)
@@ -107,7 +110,10 @@ def handler(event, context):
 
             logger.info("所有租户处理完毕，提交事务。")
             conn.commit()
-            
+            with conn.cursor() as cur:
+                cur.execute("SELECT count(*) AS n FROM public.tenants;")
+                n = cur.fetchone()[0]
+                logger.info(f"[DBSETUP_DEBUG] after commit: public.tenants count={n}")
             return {'statusCode': 200, 'body': "数据库和所有租户已成功初始化。"}
 
     except (Exception, psycopg2.Error) as error:

@@ -1,9 +1,10 @@
 # backend/lambda/users/users.py
-# 修正了 Lambda Layer 的导入路径
+# 修正了 Lambda Layer 的导入路径；支持 POST 创建用户并校验方案用户数限额
 
 import json
 import os
 import jwt
+import bcrypt
 from psycopg2.extras import RealDictCursor
 
 # 从 Lambda Layer 直接导入共享模块
@@ -64,7 +65,7 @@ def handler(event, context):
                     return build_response(403, {"message": "权限不足，只有管理员才能查看用户列表。"})
                 
                 # 管理员可以查看其租户下的所有用户
-                cur.execute("SELECT id, name, email, role, created_at, last_login_at FROM users ORDER BY created_at DESC")
+                cur.execute("SELECT id, name, email, role, is_active, created_at FROM users ORDER BY created_at DESC")
                 users = cur.fetchall()
                 return build_response(200, users, encoder=CustomEncoder)
 
@@ -74,7 +75,7 @@ def handler(event, context):
                 if not is_admin and str(current_user_id) != user_id_from_path:
                     return build_response(403, {"message": "权限不足，您只能查看自己的信息。"})
 
-                cur.execute("SELECT id, name, email, role, created_at, last_login_at FROM users WHERE id = %s", (user_id_from_path,))
+                cur.execute("SELECT id, name, email, role, is_active, created_at FROM users WHERE id = %s", (user_id_from_path,))
                 user = cur.fetchone()
                 
                 if user:
@@ -82,7 +83,38 @@ def handler(event, context):
                 else:
                     return build_response(404, {"message": "用户未找到。"})
             
-            # 其他方法 (POST, PUT, DELETE) 待实现
+            # POST /users (创建用户，仅管理员；校验方案 max_users 限额)
+            elif method == 'POST' and not user_id_from_path:
+                if not is_admin:
+                    return build_response(403, {"message": "权限不足，只有管理员才能创建用户。"})
+                body = json.loads(event.get("body") or "{}")
+                name = (body.get("name") or "").strip()
+                email = (body.get("email") or "").strip()
+                password = body.get("password") or ""
+                role = (body.get("role") or "staff").strip()
+                if not name or not email or not password:
+                    return build_response(400, {"message": "缺少 name、email 或 password。"})
+                tenant_id = jwt_payload.get("tenant_id")
+                if tenant_id is not None:
+                    cur.execute(
+                        "SELECT p.max_users FROM public.tenants t LEFT JOIN public.plans p ON t.plan_id = p.id WHERE t.id = %s",
+                        (tenant_id,),
+                    )
+                    row = cur.fetchone()
+                    max_users = row.get("max_users") if row else None
+                    if max_users is not None:
+                        cur.execute("SELECT count(*) AS c FROM users")
+                        count = cur.fetchone()["c"]
+                        if count >= max_users:
+                            return build_response(400, {"message": f"当前方案最多允许 {max_users} 个用户，已达上限。"})
+                hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                cur.execute(
+                    "INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s) RETURNING id, name, email, role, created_at",
+                    (name, email, hashed, role),
+                )
+                new_user = cur.fetchone()
+                conn.commit()
+                return build_response(201, dict(new_user), encoder=CustomEncoder)
 
             else:
                 return build_response(405, {"message": f"不支持的 HTTP 方法: {method}"})

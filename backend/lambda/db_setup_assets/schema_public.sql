@@ -68,6 +68,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_tenants_changetimestamp ON public.tenants;
 CREATE TRIGGER update_tenants_changetimestamp BEFORE UPDATE
 ON public.tenants FOR EACH ROW EXECUTE PROCEDURE 
 update_changetimestamp_column();
@@ -89,6 +90,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS on_tenant_insert_create_schema ON public.tenants;
 CREATE TRIGGER on_tenant_insert_create_schema
   AFTER INSERT ON public.tenants
   FOR EACH ROW EXECUTE PROCEDURE create_tenant_schema_and_tables();
@@ -193,3 +195,101 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- ========= [V14] 方案用量限额列 (basic=5/2GB/null, pro=20/20GB/10每日, enterprise=无限制) =========
+DO $$
+BEGIN
+    ALTER TABLE public.plans ADD COLUMN max_users INT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE public.plans ADD COLUMN max_storage_gb INT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE public.plans ADD COLUMN ai_calls_per_day INT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+UPDATE public.plans SET max_users = 5, max_storage_gb = 2, ai_calls_per_day = NULL WHERE code = 'basic';
+UPDATE public.plans SET max_users = 20, max_storage_gb = 20, ai_calls_per_day = 10 WHERE code = 'pro';
+UPDATE public.plans SET max_users = NULL, max_storage_gb = NULL, ai_calls_per_day = NULL WHERE code = 'enterprise';
+
+-- ========= 租户变更历史表 =========
+CREATE TABLE IF NOT EXISTS public.tenant_history (
+    id SERIAL PRIMARY KEY,
+    tenant_id INT NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    action VARCHAR(50) NOT NULL,
+    changed_by VARCHAR(255),
+    changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    payload JSONB
+);
+
+-- ========= 工单表 (租户在系统设置→技术支持提交，后台管理员在工单中心查看/回复) =========
+CREATE TABLE IF NOT EXISTS public.tickets (
+    id SERIAL PRIMARY KEY,
+    tenant_id INT NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    contact_email VARCHAR(255) NOT NULL,
+    subject VARCHAR(500) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    priority VARCHAR(50) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'open',
+    body TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS public.ticket_replies (
+    id SERIAL PRIMARY KEY,
+    ticket_id INT NOT NULL REFERENCES public.tickets(id) ON DELETE CASCADE,
+    author_type VARCHAR(20) NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+DROP TRIGGER IF EXISTS update_tickets_changetimestamp ON public.tickets;
+CREATE TRIGGER update_tickets_changetimestamp BEFORE UPDATE ON public.tickets
+FOR EACH ROW EXECUTE PROCEDURE update_changetimestamp_column();
+
+-- ========= 行业默认分类/示例商品模板 (新建租户时按 industry_id 写入其 schema) =========
+CREATE TABLE IF NOT EXISTS public.industry_category_templates (
+    id SERIAL PRIMARY KEY,
+    industry_id INT NOT NULL REFERENCES public.industries(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    sort_order INT DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS public.industry_demo_products (
+    id SERIAL PRIMARY KEY,
+    industry_id INT NOT NULL REFERENCES public.industries(id) ON DELETE CASCADE,
+    sku VARCHAR(100) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    specs TEXT,
+    unit VARCHAR(50),
+    base_price NUMERIC(12, 2) DEFAULT 0,
+    cost_price NUMERIC(12, 2) DEFAULT 0
+);
+-- 为已有行业插入默认分类与示例商品模板（新建租户时按行业写入其 schema）
+DO $$
+DECLARE
+    i_五金 INT; i_服装 INT; i_餐饮 INT; i_其他 INT;
+BEGIN
+    SELECT id INTO i_五金 FROM public.industries WHERE name = '五金机电' LIMIT 1;
+    SELECT id INTO i_服装 FROM public.industries WHERE name = '服装鞋帽' LIMIT 1;
+    SELECT id INTO i_餐饮 FROM public.industries WHERE name = '餐饮零售' LIMIT 1;
+    SELECT id INTO i_其他 FROM public.industries WHERE name = '其他' LIMIT 1;
+    IF i_五金 IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.industry_category_templates WHERE industry_id = i_五金) THEN
+        INSERT INTO public.industry_category_templates (industry_id, name, sort_order) VALUES (i_五金, '五金配件', 0), (i_五金, '机电设备', 1);
+        INSERT INTO public.industry_demo_products (industry_id, sku, name, specs, unit, base_price, cost_price) VALUES (i_五金, 'SAMPLE-001', '示例螺丝刀', '标准型', '把', 25.00, 12.00);
+    END IF;
+    IF i_服装 IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.industry_category_templates WHERE industry_id = i_服装) THEN
+        INSERT INTO public.industry_category_templates (industry_id, name, sort_order) VALUES (i_服装, '上衣', 0), (i_服装, '鞋帽', 1);
+        INSERT INTO public.industry_demo_products (industry_id, sku, name, specs, unit, base_price, cost_price) VALUES (i_服装, 'SAMPLE-002', '示例T恤', '均码', '件', 89.00, 45.00);
+    END IF;
+    IF i_餐饮 IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.industry_category_templates WHERE industry_id = i_餐饮) THEN
+        INSERT INTO public.industry_category_templates (industry_id, name, sort_order) VALUES (i_餐饮, '食材', 0), (i_餐饮, '饮料', 1);
+        INSERT INTO public.industry_demo_products (industry_id, sku, name, specs, unit, base_price, cost_price) VALUES (i_餐饮, 'SAMPLE-003', '示例饮料', '500ml', '瓶', 5.00, 2.00);
+    END IF;
+    IF i_其他 IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.industry_category_templates WHERE industry_id = i_其他) THEN
+        INSERT INTO public.industry_category_templates (industry_id, name, sort_order) VALUES (i_其他, '默认分类', 0);
+        INSERT INTO public.industry_demo_products (industry_id, sku, name, specs, unit, base_price, cost_price) VALUES (i_其他, 'SAMPLE-000', '示例商品', '通用', '件', 99.00, 50.00);
+    END IF;
+END $$;
