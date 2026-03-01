@@ -326,3 +326,84 @@ aws s3 sync 智汇云-erp/dist/ s3://joriapp-erp-backend-frontendbucket-tk8kikka
 ```bash
 aws cloudformation describe-stacks --stack-name jori-erp-backend --query "Stacks[0].Outputs[?OutputKey=='FrontendURL'].OutputValue" --output text
 ```
+---
+
+## 9. 当前架构与资源清单（与 template.yaml 对应）
+
+### 9.1. 后端资源一览
+
+| 资源类型 | 逻辑 ID | 说明 |
+|--------|---------|------|
+| 存储 | FrontendBucket | S3 静态网站，托管前端构建产物 |
+| API | ZhiHuiErpHttpApi | HTTP API，CORS 已配置，为所有 Lambda 提供路由 |
+| 网络 | VPC, PublicSubnetA/B, PrivateSubnetA/B, NAT, 安全组 | Lambda 与 RDS 部署在 VPC 内，RDS 仅内网可访问 |
+| 数据库 | DBInstance (RDS PostgreSQL) | 多租户：public schema + 每租户独立 tenant_* schema |
+| 凭据 | SuperAdminSecret (Secrets Manager) | 超级管理员账号密码 |
+| Layer | DatabaseUtilsLayer | 提供 db_utils（get_public_connection / get_db_connection / get_tenant_db_connection / build_response） |
+| Lambda | DbSetupFunction | 执行 schema_public.sql、schema_tenant.sql，创建 demo 租户并写入 seed |
+| Lambda | DbSetupInvokerFunction | CloudFormation Custom Resource 处理器，部署时调用 DbSetup，带重试 |
+| Custom Resource | DbSetupCustomResource | 依赖 DbSetupFunction、DBInstance，Create/Update 时触发 DbSetup |
+| Lambda | AuthFunction | POST /api/auth/login：超级管理员与租户用户登录，返回 JWT 与 user |
+| Lambda | SaasAdminFunction | /admin/{proxy+}：plans、industries 等管理接口，需超级管理员 JWT |
+| Lambda | TenantsFunction | GET/POST /api/tenants、/api/tenants/:id/usage|history|status|plan|reset-password|provision-subdomain、DELETE 租户 |
+| Lambda | UsersFunction | 租户内用户管理，按 JWT 的 tenant_id 设置 search_path |
+| Lambda | TicketsFunction | 工单 API，公共连接读 public.tickets |
+| Lambda | DebugDbDumpFunction | 调试用，导出库表信息 |
+
+### 9.2. 前端应用结构（智汇云-erp）
+
+- **技术栈**：Vite + React + TypeScript，路由 React Router。
+- **入口**：`App.tsx`。根据是否登录、是否超级管理员决定渲染登录页、SaaS 管理（SaasAdmin）或租户内 ERP（Layout + 各 Page）。
+- **认证**：登录后 token 存 localStorage，并写入 `apiClient.defaults.headers.common['Authorization']`；从 localStorage 恢复会话时同样恢复该 header。
+- **API 基地址**：`智汇云-erp/api/index.ts` 中 `baseURL` 指向 API Gateway 的 Invoke URL（与 CloudFormation 输出 ApiGatewayEndpoint 一致）。
+- **关键页面**：
+  - `LoginPage.tsx`：租户选择 + 账号密码；超级管理员不选租户；移动端默认使用 demo 租户。
+  - `SaasAdmin.tsx`：超级管理员后台入口，子路由包含租户管理、订阅方案、行业、工单等。
+  - `pages/saas-admin/index.tsx`：SaaS 主仪表盘，展示租户列表与统计；请求 GET /api/tenants 与 GET /admin/plans、GET /admin/industries。
+  - `pages/saas-admin/tenants/[tenantId].tsx`：单个租户管理控制台。
+- **工具**：`utils/saasUtils.tsx` 提供 `getTenantsArrayFromResponse`（解析租户列表响应）、`transformTenantFromApi`（转为前端 Tenant 类型）、`formatDate`、`StatCard`。
+
+### 9.3. 关键数据流（与当前实现一致）
+
+- **超级管理员登录 → 租户列表**：POST /api/auth/login（无 tenantDomain）→ 返回 JWT（含 is_super_admin）→ GET /api/tenants 带 Bearer → TenantsFunction 用 get_db_connection(event) 得到 public 连接 → 查询 public.tenants 返回完整列表。
+- **租户用户登录**：POST /api/auth/login 带 tenantDomain → Auth 查 public.tenants 得 schema → get_tenant_db_connection(schema) 验证用户 → 返回 JWT（含 tenant_id）及 user（含 role/name 等）。
+- **租户列表展示**：前端用 getTenantsArrayFromResponse(response.data) 取数组（兼容直接数组或 Lambda 代理 body 字符串），再 map(transformTenantFromApi) 后 setState 渲染表格。
+
+---
+
+## 10. 近期修改记录（架构与问题修复）
+
+以下修改已纳入当前代码，反映在 README 中便于维护与排错。
+
+### 10.1. 租户用户登录后白屏
+
+- **原因**：登录接口返回的 user 缺少 `role`/`name`，前端用 `hasAccess(activePage)` 依赖 `user.role`；无 role 时视为无权限，渲染 UnauthorizedPage，原实现为空 div，表现为白屏。
+- **后端**（`backend/lambda/auth/auth.py`）：在租户用户登录成功返回的 `user_object` 中补充 `name`、`fullName`、`role`（从 DB role 规范为 admin/sales/warehouse/finance/staff）、`tenant_id`，保证前端权限与展示所需字段齐全。
+- **前端**（`智汇云-erp/App.tsx`）：  
+  - `hasAccess`：当 `user.role` 缺失时默认视为 `'admin'`，避免有用户却无权限导致一直进无权限页。  
+  - `UnauthorizedPage`：由空 div 改为提示「您没有权限访问该页面」+「返回仪表盘」按钮，避免完全白屏。
+
+### 10.2. 超级管理员登录后租户一览为空
+
+- **原因 1（后端）**：DbSetup 仅在手动或 Custom Resource 执行时创建 demo 租户；且 schema_public.sql 中部分触发器重复创建会报错，导致 DbSetup 失败、public.tenants 无数据。
+- **后端修改**：  
+  - **schema_public.sql**：在相关 `CREATE TRIGGER` 前增加 `DROP TRIGGER IF EXISTS ...`（update_tenants_changetimestamp、on_tenant_insert_create_schema、update_tickets_changetimestamp），使脚本可重复执行。  
+  - **DbSetup**（`backend/lambda/db_setup_assets/db_setup.py`）：连接成功后打 `[DBSETUP_DEBUG]` 日志（host/dbname/current_database）；commit 后再打 public.tenants 行数，便于与 TenantsFunction 日志对比。  
+  - **DbSetup Invoker**（`backend/lambda/db_setup_invoker/db_setup_invoker.py`）：CloudFormation Custom Resource 处理器，在 Create/Update 时调用 DbSetup；增加重试（次数与间隔可配置），避免 RDS 未就绪导致失败。  
+  - **template.yaml**：新增 DbSetupInvokerFunction、DbSetupInvokerPermission、DbSetupCustomResource（DependsOn: DbSetupFunction, DBInstance），部署时自动执行 DbSetup。  
+  - **TenantsFunction**（`backend/lambda/tenants/tenants.py`）：管理员列表接口中增加 `[TENANTS_DEBUG]` 日志（current_database、current_schema、public.tenants 行数、首行关键字段）；返回列表中 id 统一转为字符串，与前端 Tenant 类型一致。
+- **原因 2（前端）**：Promise.all 中若 GET /admin/plans 或 GET /admin/industries 失败，整次 fetch 失败，setTenants 未执行；此外未兼容 Lambda 代理返回的 body 字符串或包装结构。
+- **前端修改**：  
+  - **utils/saasUtils.tsx**：新增 `getTenantsArrayFromResponse(data)`，兼容 response.data 为数组或带 `body` 的字符串/数组；`transformTenantFromApi` 中 id/plan_code 转为字符串、status 限定为合法枚举、created_at 为字符串。  
+  - **pages/saas-admin/index.tsx**：先单独请求 GET /api/tenants，成功即用 getTenantsArrayFromResponse + transformTenantFromApi 设置 tenants；再并行请求 plans/industries，失败不影响已展示的租户列表。  
+  - **pages/saas-admin/tenants/[tenantId].tsx**：租户列表同样通过 getTenantsArrayFromResponse 解析后再查找当前 tenantId。
+
+### 10.3. 登录页与移动端
+
+- **LoginPage.tsx**：移动端登录不再使用占位符 `YOUR_DEFAULT_TENANT_DOMAIN`，改为固定使用租户域名 `demo`，与预置 demo 租户一致。  
+- **智汇云-erp**：已安装 `@types/react`、`@types/react-dom`，消除 React/JSX 相关 TypeScript 报错（LoginPage 等）。
+
+### 10.4. 调试与运维
+
+- **docs/debug-tenant-list-curl.sh**：使用 superadmin 登录获取 token，再请求 GET /api/tenants，用于不经过前端直接验证后端返回。  
+- **docs/DEBUGGING-TENANT-LIST.md**：说明如何用 curl、CloudWatch 中 [TENANTS_DEBUG] 与 [DBSETUP_DEBUG] 日志对比库与行数，以及如何再次手动执行 DbSetup 确保 demo 租户存在。
