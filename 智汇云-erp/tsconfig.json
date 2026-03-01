@@ -19,15 +19,17 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    }
+    "baseUrl": "."
   },
   "include": [
-    "src",
-    "types.ts"
+    "./*.ts",
+    "./*.tsx",
+    "./pages/**/*.ts",
+    "./pages/**/*.tsx",
+    "./utils/**/*.ts",
+    "./utils/**/*.tsx",
+    "./components/**/*.ts",
+    "./components/**/*.tsx",
+    "./api/**/*.ts"
   ]
 }

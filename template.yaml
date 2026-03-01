@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  智汇-ERP后端 (zhihui-erp-backend) V4 - 包含调试函数
+  智汇-ERP后端 (zhihui-erp-backend) V5 - 已集成SaaS后台管理API
 
   一个为多租户ERP系统设计的、采用现代HTTP API架构的SAM模板。
 
@@ -333,6 +333,38 @@ Resources:
             Path: /api/auth/login
             Method: POST
 
+  SaasAdminFunction: # <--- 新增的后台管理函数
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: erp-saas-admin-function
+      CodeUri: backend/lambda/saas_admin/
+      Handler: main.handler
+      Layers:
+        - !Ref DatabaseUtilsLayer
+      Policies:
+        - VPCAccessPolicy: {}
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt DBInstance.Endpoint.Address
+          DB_PORT: !GetAtt DBInstance.Endpoint.Port
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          JWT_SECRET: f86b817fd2727c45e842a4bd55855dae2b91b10e29bc7e6dc33ff4024e048ebd
+      Events:
+        AdminApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ZhiHuiErpHttpApi
+            Path: /admin/{proxy+}
+            Method: ANY
+
   TenantsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -439,7 +471,7 @@ Resources:
             Path: /api/users/{userId}
             Method: GET
 
-  DebugDbDumpFunction: # <--- 新增的调试函数
+  DebugDbDumpFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: erp-debug-db-dump-function

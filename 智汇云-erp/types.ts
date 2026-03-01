@@ -192,7 +192,7 @@ export interface StatCardProps {
   value: string;        // 显示的主要数值
   trend?: number;       // (可选) 趋势百分比，例如 10 或 -5。
   trendLabel?: string;  // (可选) 趋势标签，例如 "相比上月"。
-  icon: any;            // 卡片图标 (类型修正为 any)
+  icon: React.ReactElement<{ className?: string }>;            // 卡片图标 (类型修正为 any)
   color: string;        // 卡片颜色相关的CSS类
   onClick?: () => void; // (可选) 卡片点击事件
 }

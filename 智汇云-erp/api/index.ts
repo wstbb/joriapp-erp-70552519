@@ -1,6 +1,6 @@
 
 import axios from 'axios';
-import { User, Tenant } from '../types'; // Adjusted path to root
+import { User, Tenant } from '../types'; // [修正] 路径从 ../types 改为 ./types
 
 // Create an Axios instance
 const apiClient = axios.create({
