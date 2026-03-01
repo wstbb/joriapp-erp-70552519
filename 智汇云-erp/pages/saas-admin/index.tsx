@@ -8,7 +8,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import apiClient from '../../api'; 
 import { Icons } from '../../components/Icons';
 import { Tenant, Plan, Industry } from '../../types';
-import { StatCard, formatDate, transformTenantFromApi } from '../../utils/saasUtils';
+import { StatCard, formatDate, transformTenantFromApi, getTenantsArrayFromResponse } from '../../utils/saasUtils';
 
 const SaasAdminDashboard: React.FC<{ onLogout: () => void; }> = ({ onLogout }) => {
     
@@ -25,18 +25,29 @@ const SaasAdminDashboard: React.FC<{ onLogout: () => void; }> = ({ onLogout }) =
 
     useEffect(() => {
         const fetchData = async () => {
+            setIsLoading(true);
             try {
-                setIsLoading(true);
-                const [tenantsRes, plansRes, industriesRes] = await Promise.all([
-                    apiClient.get('/api/tenants'),
-                    apiClient.get('/admin/plans'), 
+                // 先单独拉取租户列表并立即展示，避免因 plans/industries 失败导致整页无数据
+                const tenantsRes = await apiClient.get('/api/tenants').catch((e) => {
+                    console.error('GET /api/tenants 失败:', e);
+                    return { data: [] };
+                });
+                const rawList = getTenantsArrayFromResponse(tenantsRes.data);
+                setTenants(rawList.map((t: any) => transformTenantFromApi(t)));
+            } catch (e) {
+                console.error('租户列表加载失败:', e);
+            }
+            try {
+                const [plansRes, industriesRes] = await Promise.all([
+                    apiClient.get('/admin/plans'),
                     apiClient.get('/admin/industries'),
                 ]);
-                setTenants(tenantsRes.data.map(transformTenantFromApi));
-                setPlans(plansRes.data);
-                setIndustries(industriesRes.data);
-            } catch (error) { console.error("加载初始数据失败:", error); }
-            finally { setIsLoading(false); }
+                setPlans(Array.isArray(plansRes.data) ? plansRes.data : []);
+                setIndustries(Array.isArray(industriesRes.data) ? industriesRes.data : []);
+            } catch (error) {
+                console.error('加载 plans/industries 失败:', error);
+            }
+            setIsLoading(false);
         };
         fetchData();
     }, []);
@@ -44,7 +55,8 @@ const SaasAdminDashboard: React.FC<{ onLogout: () => void; }> = ({ onLogout }) =
     const refreshTenants = async () => {
         try {
             const response = await apiClient.get('/api/tenants');
-            setTenants(response.data.map(transformTenantFromApi));
+            const rawList = getTenantsArrayFromResponse(response.data);
+            setTenants(rawList.map((t: any) => transformTenantFromApi(t)));
         } catch (error) {
             console.error("刷新租户列表失败:", error);
         }

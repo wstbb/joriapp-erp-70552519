@@ -6,6 +6,26 @@ import React from 'react';
 import { Tenant, StatCardProps } from '../types';
 
 /**
+ * 从 GET /api/tenants 的响应中取出租户数组（兼容直接数组或 Lambda 代理 body 字符串）
+ */
+export function getTenantsArrayFromResponse(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && 'body' in data) {
+    const body = (data as { body?: unknown }).body;
+    if (typeof body === 'string') {
+      try {
+        const parsed = JSON.parse(body);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    if (Array.isArray(body)) return body;
+  }
+  return [];
+}
+
+/**
  * (主动重构 - 类型安全终极版)
  * 将从API获取的原始租户数据转换为前端严格的 Tenant 类型。
  * - 彻底告别不安全的 `any` 属性访问。
@@ -27,16 +47,16 @@ export const transformTenantFromApi = (apiTenant: any): Tenant => {
   } = apiTenant || {}; // 使用 `|| {}` 防止 apiTenant 本身为 null 或 undefined
 
   return {
-    id,
+    id: id != null ? String(id) : '',
     name,
     domain,
-    status,
+    status: status === 'active' || status === 'deploying' || status === 'suspended' ? status : 'suspended',
     admin_name,
     admin_email,
-    created_at,
-    plan: plan_name,      // 字段映射
-    plan_code,
-    industry: industry_name // 字段映射
+    created_at: typeof created_at === 'string' ? created_at : new Date().toISOString(),
+    plan: plan_name,
+    plan_code: plan_code != null ? String(plan_code) : '',
+    industry: industry_name
   };
 };
 

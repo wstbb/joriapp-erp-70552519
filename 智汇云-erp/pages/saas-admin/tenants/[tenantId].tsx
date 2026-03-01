@@ -8,7 +8,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../../../api'; 
 import { Icons } from '../../../components/Icons';
 import { Tenant } from '../../../types';
-import { formatDate, transformTenantFromApi } from '../../../utils/saasUtils';
+import { formatDate, transformTenantFromApi, getTenantsArrayFromResponse } from '../../../utils/saasUtils';
 
 const TenantConsolePage: React.FC = () => {
     // 修正 #2: 使用正确的 hooks 获取路由参数和导航函数
@@ -27,7 +27,8 @@ const TenantConsolePage: React.FC = () => {
         setIsLoading(true);
         try {
             const tenantsRes = await apiClient.get('/api/tenants'); 
-            const currentTenant = tenantsRes.data.map(transformTenantFromApi).find((t: Tenant) => t.id === tenantId);
+            const rawList = getTenantsArrayFromResponse(tenantsRes.data);
+            const currentTenant = rawList.map((t: any) => transformTenantFromApi(t)).find((t: Tenant) => t.id === tenantId);
             
             if (currentTenant) {
                 setTenant(currentTenant);
